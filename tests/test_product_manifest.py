@@ -11,7 +11,7 @@ from runlab.release_audit import audit_release_tree
 
 
 def test_manifest_runtime_versions_agree():
-    assert PRODUCT_VERSION.startswith("0.37.")
+    assert PRODUCT_VERSION.startswith("0.38.")
     assert SCHEMA_VERSION == CATALOG_SCHEMA_VERSION == 7
     assert LIBRARY_VERSION == ANALYSIS_LIBRARY_FORMAT_VERSION == 2
     assert WORKBOOK_FORMAT_VERSION == 8

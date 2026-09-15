@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Build / packaging
+build/
+dist/
+*.spec
+installer/Output/
+release-artifacts/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local application state / credentials
+.nhra-tech-data/
+local-data/
+logs/
+*.log
+*.key
+*.pem
+*.pfx
+*.p12
+.env
+.env.*
+
+# Real race/team data must never be committed. Synthetic/bundled examples are explicitly allowed below.
+*.rpk
+*.RPK
+*.ld
+*.LD
+*.dl
+*.DL
+*.dlz
+*.DLZ
+*.big
+*.bigTune
+*.bigtune
+*.MaxxECU-log
+*.vbo
+*.vbb
+*.vbin
+*.mf4
+*.mdf
+*.fdt
+*.ftd
+*.xrk
+*.ibt
+*.blf
+*.asc
+*.trc
+
+!examples/native_demo_racepak.rpk
+!examples/native_demo_motec.ld
+!examples/native_demo_maxxecu.MaxxECU-log
+
+# Ad-hoc validation pulls
+real_files/
+validation/private/

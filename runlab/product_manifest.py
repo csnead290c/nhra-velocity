@@ -12,9 +12,12 @@ from dataclasses import dataclass, asdict
 import os
 from typing import Any, Mapping
 
+from .version import __version__, __channel__
+
 PRODUCT_NAME = "NHRA Tech Data"
 PRODUCT_TAGLINE = "Technical Data, Analysis & Vehicle Performance"
-PRODUCT_VERSION = "0.37.1-development"
+PRODUCT_VERSION = __version__
+PRODUCT_CHANNEL = __channel__
 
 CATALOG_SCHEMA_VERSION = 7
 WORKBOOK_FORMAT_VERSION = 8
@@ -73,6 +76,7 @@ def manifest_dict(env: Mapping[str, str] | None = None) -> dict[str, Any]:
         "product": PRODUCT_NAME,
         "tagline": PRODUCT_TAGLINE,
         "product_version": PRODUCT_VERSION,
+        "update_channel": PRODUCT_CHANNEL,
         "formats": {
             "catalog_schema": CATALOG_SCHEMA_VERSION,
             "workbook": WORKBOOK_FORMAT_VERSION,

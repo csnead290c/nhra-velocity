@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements-build-windows.txt
+      - run: python -m pytest -q
+      - run: python -m compileall -q .
+      - run: python -m runlab.cli selftest
+      - run: python -m runlab.cli release audit --root .
+      - shell: pwsh
+        run: |
+          $version = python -c "from runlab.version import __version__; print(__version__)"
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "Tag/version mismatch: ${{ github.ref_name }} vs v$version" }
+          "NHRA_TECH_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - shell: cmd
+        run: build_windows_exe.bat
+      - shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - shell: pwsh
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\NHRA-Tech-Data.iss'
+      - shell: pwsh
+        run: |
+          $setup = Get-ChildItem installer\Output\NHRA-Tech-Data-Setup-*.exe | Select-Object -First 1
+          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$($setup.Name)"
+          python tools/build_update_manifest.py $setup.FullName --version $env:NHRA_TECH_VERSION --channel stable --installer-url $url --source-commit "${{ github.sha }}" --release-notes-url "https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}" --output update.json
+          (Get-FileHash -Algorithm SHA256 $setup.FullName).Hash.ToLower() + "  " + $setup.Name | Set-Content SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            installer/Output/NHRA-Tech-Data-Setup-*.exe
+            update.json
+            SHA256SUMS.txt
+            PRODUCT_MANIFEST.json
+            VALIDATION_REPORT.md

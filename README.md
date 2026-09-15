@@ -1,4 +1,4 @@
-# NHRA Tech Data — Development v0.37.1
+# NHRA Tech Data — Development v0.38
 
 NHRA Tech Data is a native desktop engineering workstation for NHRA telemetry, vehicle-performance analysis, synchronized evidence, and future incident reconstruction.
 

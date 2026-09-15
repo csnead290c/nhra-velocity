@@ -1,7 +1,7 @@
 {
   "product": "NHRA Tech Data",
   "tagline": "Technical Data, Analysis & Vehicle Performance",
-  "product_version": "0.37.1-development",
+  "product_version": "0.38.0-dev.1",
   "formats": {
     "catalog_schema": 7,
     "workbook": 8,
@@ -25,5 +25,6 @@
       "commit_sha": "77eb280fe94825f93f2cdfdd3ab2568851aa6a19",
       "verified": true
     }
-  ]
+  ],
+  "update_channel": "development"
 }
