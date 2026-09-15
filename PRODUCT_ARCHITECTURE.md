@@ -1,4 +1,4 @@
-# NHRA Technical Data Platform — Product Architecture v0.38
+# NHRA Velocity — Product Architecture v0.38
 
 
 ## v0.37 interaction-performance layer
@@ -14,7 +14,7 @@ The workstation now separates file-family recognition, decoder availability and 
 This milestone deliberately moves the product toward a telemetry-first workstation: the central waveform and native logger import path are P0 capabilities; specialist analysis surfaces are secondary and discoverable rather than always visible. Current RacePak `CAN_Device` and MoTeC M1 files are decoded locally without a Box/runtime dependency, and raw source bytes remain unchanged.
 ## North-star product
 
-NHRA Tech Data is one engineering platform with three equal pillars:
+NHRA Velocity is one engineering platform with three equal pillars:
 
 1. **NHRA Tech Services** — authoritative identity, Events, Entries, Runs, official timing/weather, permanent Assets, users, permissions, shared cases and approved published results.
 2. **Analysis Workstation** — ATLAS/i2-class daily telemetry, comparison, math, reporting, synchronized evidence, alarms, automation and future live/replay workflows.
@@ -30,7 +30,7 @@ NHRA Tech Services (authoritative)
     timing / weather / identity / permissions
                  │
                  ▼
-NHRA Tech Data Desktop
+NHRA Velocity Desktop
     local mirror + immutable verified cache
     workbooks / displays / reports / cases
                  │

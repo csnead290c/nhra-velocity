@@ -85,7 +85,7 @@ def generated_run_from_result(
         vals = pd.to_numeric(df[col], errors="coerce").to_numpy(float)
         native[col] = ChannelSeries(col, t.copy(), vals, units.get(col,""), None, 3, True, {"generated":True})
     run = TelemetryRun(
-        name=name, data=df, channel_map=cmap, units=units, vendor="NHRA Tech Data generated",
+        name=name, data=df, channel_map=cmap, units=units, vendor="NHRA Velocity generated",
         metadata={
             "generated_scenario": True,
             "generated_from": source_run_name,

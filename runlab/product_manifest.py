@@ -3,7 +3,7 @@ from __future__ import annotations
 """Canonical product/release manifest.
 
 This module is intentionally small and dependency-free.  It is the one place
-that defines NHRA Tech Data's product version and portable/persistent format
+that defines NHRA Velocity's product version and portable/persistent format
 versions.  Release tooling and tests use it to catch copy-forward drift before
 an archive is frozen.
 """
@@ -14,7 +14,7 @@ from typing import Any, Mapping
 
 from .version import __version__, __channel__
 
-PRODUCT_NAME = "NHRA Tech Data"
+PRODUCT_NAME = "NHRA Velocity"
 PRODUCT_TAGLINE = "Technical Data, Analysis & Vehicle Performance"
 PRODUCT_VERSION = __version__
 PRODUCT_CHANNEL = __channel__

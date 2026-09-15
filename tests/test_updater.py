@@ -9,10 +9,10 @@ from runlab.updater import UpdateManifest, parse_version, sha256_file
 def _manifest(**overrides):
     raw = {
         'schema': 1,
-        'product': 'NHRA Tech Data',
+        'product': 'NHRA Velocity',
         'version': '0.38.0',
         'channel': 'stable',
-        'installer_url': 'https://example.com/NHRA-Tech-Data-Setup.exe',
+        'installer_url': 'https://example.com/NHRA-Velocity-Setup.exe',
         'sha256': 'a' * 64,
         'size_bytes': 123,
     }
@@ -42,5 +42,5 @@ def test_manifest_rejects_non_https_and_invalid_hash():
 
 def test_sha256_file(tmp_path: Path):
     p = tmp_path / 'x.bin'
-    p.write_bytes(b'NHRA Tech Data')
-    assert sha256_file(p) == hashlib.sha256(b'NHRA Tech Data').hexdigest()
+    p.write_bytes(b'NHRA Velocity')
+    assert sha256_file(p) == hashlib.sha256(b'NHRA Velocity').hexdigest()

@@ -15,7 +15,7 @@ def sha256_file(path: Path) -> str:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Create NHRA Tech Data update.json for a release installer")
+    p = argparse.ArgumentParser(description="Create NHRA Velocity update.json for a release installer")
     p.add_argument("installer")
     p.add_argument("--version", required=True)
     p.add_argument("--channel", choices=("stable", "beta", "development"), default="stable")
@@ -31,7 +31,7 @@ def main() -> None:
     installer = Path(args.installer)
     payload = {
         "schema": 1,
-        "product": "NHRA Tech Data",
+        "product": "NHRA Velocity",
         "version": args.version,
         "channel": args.channel,
         "installer_url": args.installer_url,

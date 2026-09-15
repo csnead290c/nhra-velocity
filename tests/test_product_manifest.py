@@ -28,8 +28,8 @@ def test_manifest_upstreams_fail_explicitly_to_unverified_without_shas():
 
 
 def test_release_audit_catches_doc_version_drift(tmp_path: Path):
-    (tmp_path/"README.md").write_text("# NHRA Tech Data — Development v0.30\n",encoding="utf-8")
-    (tmp_path/"ARCHITECTURE.md").write_text("# NHRA Tech Data Architecture — v0.31\n",encoding="utf-8")
+    (tmp_path/"README.md").write_text("# NHRA Velocity — Development v0.30\n",encoding="utf-8")
+    (tmp_path/"ARCHITECTURE.md").write_text("# NHRA Velocity Architecture — v0.31\n",encoding="utf-8")
     result=audit_release_tree(tmp_path,env={})
     assert not result["ok"]
     assert any(x["check"]=="doc.README.md" and x["level"]=="error" for x in result["findings"])

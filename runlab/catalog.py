@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""SQLite-backed run-centric catalog for NHRA Tech Data.
+"""SQLite-backed run-centric catalog for NHRA Velocity.
 
 The catalog is the local mirror of authoritative Tech Services Events/Runs/Assets
 plus local analysis state such as time mappings, engineering values and model
@@ -28,7 +28,7 @@ UNASSIGNED_EVENT_CODE = "LOCAL-UNASSIGNED"
 
 
 def default_catalog_path() -> Path:
-    path = app_data_root() / "catalog" / "nhra-tech-data.sqlite3"
+    path = app_data_root() / "catalog" / "nhra-velocity.sqlite3"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

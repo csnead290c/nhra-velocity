@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Release consistency checks used before freezing an NHRA Tech Data archive."""
+"""Release consistency checks used before freezing an NHRA Velocity archive."""
 
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -39,7 +39,7 @@ def audit_release_tree(root: str | Path, *, env: Mapping[str,str] | None = None)
     for key,val in runtime.items():
         if val != expected[key]:findings.append(AuditFinding("error",f"runtime.{key}",f"runtime={val} manifest={expected[key]}"))
 
-    docs={"README.md":r"^# NHRA Tech Data .*v(\d+\.\d+)","ARCHITECTURE.md":r"^# NHRA Tech Data Architecture — v(\d+\.\d+)","PRODUCT_ARCHITECTURE.md":r"^# NHRA Technical Data Platform — Product Architecture v(\d+\.\d+)"}
+    docs={"README.md":r"^# NHRA Velocity .*v(\d+\.\d+)","ARCHITECTURE.md":r"^# NHRA Velocity Architecture — v(\d+\.\d+)","PRODUCT_ARCHITECTURE.md":r"^# NHRA Velocity — Product Architecture v(\d+\.\d+)"}
     for rel,pattern in docs.items():
         path=root/rel
         if not path.exists():

@@ -196,7 +196,7 @@ class KeyringCredentialStore:
         except Exception as exc:  # pragma: no cover - platform/env dependent
             raise RuntimeError(
                 "Secure OS credential storage is unavailable. Install/configure the 'keyring' package; "
-                "NHRA Tech Data will not store refresh tokens in plaintext."
+                "NHRA Velocity will not store refresh tokens in plaintext."
             ) from exc
         return keyring
 

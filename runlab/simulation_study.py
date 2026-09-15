@@ -4,7 +4,7 @@ from __future__ import annotations
 
 The study layer keeps forward scenario sweeps, inverse fitting and observed-vs-
 predicted validation connected to the same VehicleConfig/Environment model used
-elsewhere in NHRA Tech Data.  It is intentionally headless so the desktop UI,
+elsewhere in NHRA Velocity.  It is intentionally headless so the desktop UI,
 batch jobs and future Tech Services derived-analysis bundles can share one
 implementation.
 """

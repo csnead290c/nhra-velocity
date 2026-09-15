@@ -1,6 +1,6 @@
-# NHRA Tech Data development workflow
+# NHRA Velocity development workflow
 
-NHRA Tech Data is maintained as a long-lived engineering application, not as a sequence of disposable ZIP builds. Git history, release tags, automated validation, reproducible Windows builds and provenance are part of the product.
+NHRA Velocity is maintained as a long-lived engineering application, not as a sequence of disposable ZIP builds. Git history, release tags, automated validation, reproducible Windows builds and provenance are part of the product.
 
 ## Branch model
 

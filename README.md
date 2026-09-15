@@ -1,18 +1,18 @@
-# NHRA Tech Data — Development v0.38
+# NHRA Velocity — Development v0.38
 
-NHRA Tech Data is a native desktop engineering workstation for NHRA telemetry, vehicle-performance analysis, synchronized evidence, and future incident reconstruction.
+NHRA Velocity is a native desktop engineering workstation for NHRA telemetry, vehicle-performance analysis, synchronized evidence, and future incident reconstruction.
 
 
 ## v0.38 long-term application foundation + NHRA-specific workflows
 
-v0.38 moves NHRA Tech Data from release-folder development toward a maintained application lifecycle. The source tree now has a Git branch/release model, semantic version source-of-truth, GitHub Actions CI, repeatable Windows installer packaging, and a feed-agnostic updater that verifies release size/SHA-256 and can require Windows Authenticode before launching an installer. Normal users remain on a normal installed executable; engineering/development builds stay separate. See `DEVELOPMENT.md` and `RELEASE_PROCESS.md`.
+v0.38 moves NHRA Velocity from release-folder development toward a maintained application lifecycle. The source tree now has a Git branch/release model, semantic version source-of-truth, GitHub Actions CI, repeatable Windows installer packaging, and a feed-agnostic updater that verifies release size/SHA-256 and can require Windows Authenticode before launching an installer. Normal users remain on a normal installed executable; engineering/development builds stay separate. See `DEVELOPMENT.md` and `RELEASE_PROCESS.md`.
 
 The workstation work in the same branch adds class-specific Run Profiles, Ctrl+F drag-run fitting, expanded ATLAS-style keyboard workflow, live cursor-range statistics, and the first standardized Pro Stock shift report. Native import also advances: the exact `DKCHI26Q3.rpk` failure is regression-qualified, and Holley EFI V6 `.dl/.dlz` now has a conservative direct reader qualified against paired NHRA Pro Stock Holley/RacePak data. Unknown Holley parameter slots remain numeric rather than guessed; V5 sparse/V3 families still fail closed.
 
 
 ## v0.37.1 Windows waveform-render hotfix
 
-The first Windows trial of v0.37 exposed a pyqtgraph compatibility regression (`GraphicsLayoutWidget` missing `autoRangeEnabled`) before the waveform could render. v0.37.1 removes the pyqtgraph implicit clip/downsample constructor flags that triggered that path and continues to use NHRA Tech Data's own peak-preserving `prepare_plot_series()` decimation. All v0.37 cursor-cache and workflow improvements remain enabled.
+The first Windows trial of v0.37 exposed a pyqtgraph compatibility regression (`GraphicsLayoutWidget` missing `autoRangeEnabled`) before the waveform could render. v0.37.1 removes the pyqtgraph implicit clip/downsample constructor flags that triggered that path and continues to use NHRA Velocity's own peak-preserving `prepare_plot_series()` decimation. All v0.37 cursor-cache and workflow improvements remain enabled.
 
 ## v0.37 interactive performance + everyday waveform workflow
 
@@ -156,7 +156,7 @@ For a self-contained executable, run `build_windows_exe.bat` on Windows with Pyt
 
 ## Local state
 
-By default the local mirror, analysis state, logs, and object cache live in the application data directory. Set `NHRA_TECH_DATA_HOME` to redirect the local state tree for testing or managed deployments.
+By default the local mirror, analysis state, logs, and object cache live in the application data directory. Set `NHRA_VELOCITY_HOME` to redirect the local state tree for testing or managed deployments.
 
 Cached immutable objects live under `library/objects/<sha256>`. The server's Asset ID and Run relationship remain authoritative; local paths are machine-specific cache details only.
 

@@ -51,7 +51,7 @@ def run_data_pipeline_selftest(example_dir: str | Path) -> List[Dict[str, object
 
 
 def format_selftest(rows: List[Dict[str, object]]) -> str:
-    lines=["NHRA Tech Data — import/plot data-pipeline self-test",""]
+    lines=["NHRA Velocity — import/plot data-pipeline self-test",""]
     for row in rows:
         status="PASS" if row.get("pass") else "FAIL"
         lines.append(f"[{status}] {row.get('file')} — {row.get('vendor', row.get('expected_vendor',''))}")

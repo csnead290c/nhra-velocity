@@ -1,4 +1,4 @@
-# NHRA Tech Data Architecture — v0.38
+# NHRA Velocity Architecture — v0.38
 
 
 ## v0.37 display performance boundary
@@ -22,7 +22,7 @@ nhratechservices.com / database / object storage
         │ authoritative Event → Entry → Run → Asset relationships
         │ official timing + weather + remote IDs/revisions/hashes
         ▼
-NHRA Tech Data desktop local mirror
+NHRA Velocity desktop local mirror
         │
         ├─ SQLite metadata mirror
         ├─ SHA-256 immutable asset cache

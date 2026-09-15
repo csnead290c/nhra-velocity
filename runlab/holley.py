@@ -98,7 +98,7 @@ def _validated_v6_layout(data: bytes) -> Tuple[int, int, int, int, float]:
     if version == HOLLEY_V5_VERSION:
         raise HolleyDecodeError(
             "Holley V5 sparse DL format was recognized. Convert/open-save it with Holley software to V6 before import; "
-            "NHRA Tech Data will not guess the V5 sparse layout."
+            "NHRA Velocity will not guess the V5 sparse layout."
         )
     if version != HOLLEY_V6_VERSION:
         raise HolleyDecodeError(

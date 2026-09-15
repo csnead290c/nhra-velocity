@@ -486,7 +486,7 @@ def cmd_enrich(args):
     print(json.dumps(info,indent=2))
 
 def main():
-    p = argparse.ArgumentParser(description="NHRA Tech Data vehicle-performance development CLI")
+    p = argparse.ArgumentParser(description="NHRA Velocity vehicle-performance development CLI")
     sp = p.add_subparsers(dest="cmd", required=True)
 
     def common(x):

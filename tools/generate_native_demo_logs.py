@@ -80,7 +80,7 @@ def write_motec(path: Path):
     struct.pack_into('<I',blob,36,0); struct.pack_into('<I',blob,70,12345); blob[74:82]=b'M1DEMO\x00\x00'; struct.pack_into('<H',blob,82,123)
     # Deliberately incorrect header count verifies linked-list traversal.
     struct.pack_into('<I',blob,86,99)
-    _putstr(blob,94,16,'09/12/2026'); _putstr(blob,126,16,'20:00:00'); _putstr(blob,158,64,'NHRA Tech Data Demo')
+    _putstr(blob,94,16,'09/12/2026'); _putstr(blob,126,16,'20:00:00'); _putstr(blob,158,64,'NHRA Velocity Demo')
     _putstr(blob,222,64,'Synthetic Drag Vehicle'); _putstr(blob,350,64,'Demo Track'); _putstr(blob,1572,64,'Generated native-import validation file')
     pos=data_start
     for i,(name,short,unit,rate,dtype_a,dtype_size,shift,mul,scale,dec,vals) in enumerate(channels):

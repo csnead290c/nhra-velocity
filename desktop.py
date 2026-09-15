@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""NHRA Tech Data desktop telemetry workstation.
+"""NHRA Velocity desktop telemetry workstation.
 
 This is intentionally a desktop application rather than a web UI.  It uses the
 same mental model as professional motorsport analysis tools: projects/workspaces
@@ -34,7 +34,7 @@ try:
         QT_MULTIMEDIA_AVAILABLE = False
 except ImportError as exc:  # pragma: no cover - environment dependent
     print(
-        "NHRA Tech Data requires PySide6 and pyqtgraph.\n"
+        "NHRA Velocity requires PySide6 and pyqtgraph.\n"
         "Install desktop requirements with: python -m pip install -r requirements-desktop.txt\n"
         f"Missing dependency: {exc}",
         file=sys.stderr,
@@ -844,7 +844,7 @@ class ChannelTree(QtWidgets.QTreeWidget):
 
     def mimeData(self, items):
         mime=super().mimeData(items); channels=[i.data(0,QtCore.Qt.UserRole) for i in items if i.data(0,QtCore.Qt.UserRole)]
-        if channels:mime.setData("application/x-nhra-tech-data-channels",json.dumps(channels).encode("utf-8"))
+        if channels:mime.setData("application/x-nhra-velocity-channels",json.dumps(channels).encode("utf-8"))
         return mime
 
     def _menu(self, pos):
@@ -1542,12 +1542,12 @@ class WaveformDisplay(QtWidgets.QWidget):
             self.remove_channel(channel)
 
     def dragEnterEvent(self, event):
-        if event.mimeData().hasFormat("application/x-nhra-tech-data-channels"):
+        if event.mimeData().hasFormat("application/x-nhra-velocity-channels"):
             event.acceptProposedAction()
 
     def dropEvent(self, event):
         try:
-            channels = json.loads(bytes(event.mimeData().data("application/x-nhra-tech-data-channels")).decode("utf-8"))
+            channels = json.loads(bytes(event.mimeData().data("application/x-nhra-velocity-channels")).decode("utf-8"))
             changed = False
             for c in channels:
                 if c not in self.channels:
@@ -3186,7 +3186,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_session_selectors()
         self.statusBar().showMessage('Open a telemetry log to begin. Ctrl+O')
         # Recovery snapshots are deliberately separate from user project files.
-        autosave_root=Path(QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.AppLocalDataLocation) or str(Path.home()/'.nhra-tech-data'))
+        autosave_root=Path(QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.AppLocalDataLocation) or str(Path.home()/'.nhra-velocity'))
         autosave_root.mkdir(parents=True,exist_ok=True)
         self._recovery_path=autosave_root/'autosave-recovery.nhratech'
         self._autosave_timer=QtCore.QTimer(self); self._autosave_timer.setInterval(90_000)
@@ -4047,7 +4047,7 @@ class MainWindow(QtWidgets.QMainWindow):
             rec=result.table.iloc[r];assign={str(c)[6:]:float(rec[c]) for c in result.table.columns if str(c).startswith('input.') and not pd.isna(rec[c])}
             try:run=create_scenario_run(h.label,vehicle,h.run.environment,assign,engine=study.engine,smooth_dt_s=study.smooth_dt_s,name=str(rec['case']))
             except Exception as exc:QtWidgets.QMessageBox.critical(out,'Scenario generation failed',str(exc));return
-            path=str(Path(QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.TempLocation) or '.').joinpath('nhra-tech-data-simulation.csv'));run.data.to_csv(path,index=False)
+            path=str(Path(QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.TempLocation) or '.').joinpath('nhra-velocity-simulation.csv'));run.data.to_csv(path,index=False)
             nh=self.store.add(path,run);nh.role='reference';nh.display_name=run.name;self.store.changed.emit();self.statusBar().showMessage(f'Added simulated compare session: {run.name}',6000)
         export.clicked.connect(do_export);savepkg.clicked.connect(save_package);addcompare.clicked.connect(add_selected);close.clicked.connect(out.accept);out.exec()
 
@@ -4573,7 +4573,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _show_import_support(self):
         text=(
-            'NHRA Tech Data import status\n\n'
+            'NHRA Velocity import status\n\n'
             'Native / direct:\n'
             '  • RacePak/DataLink .rpk — validated legacy family; real Pro Stock and Top Fuel demo files exercised in development.\n'
             '  • MoTeC .ld — native parser for currently validated LD/M1 families; additional real-log qualification remains in progress.\n'
@@ -4771,7 +4771,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 'annotations':h.run.metadata.get('annotations',[]),'derived_analyses':h.run.metadata.get('derived_analyses',{}),'analysis_profile':h.run.metadata.get('analysis_profile',''),'rsa_profile_defaults':h.run.metadata.get('rsa_profile_defaults',{})
             })
         return {
-            'version':WORKBOOK_FORMAT_VERSION,'application':'NHRA Tech Data','catalog_path':str(self.catalog.path),'analysis_library':self.analysis_library.to_dict(),'simulation_studies':list(self.simulation_studies),'compare_sets':self.compare_sets.to_dict(),
+            'version':WORKBOOK_FORMAT_VERSION,'application':'NHRA Velocity','catalog_path':str(self.catalog.path),'analysis_library':self.analysis_library.to_dict(),'simulation_studies':list(self.simulation_studies),'compare_sets':self.compare_sets.to_dict(),
             'sessions':sessions,'active_index':self.store.active_index,'worksheets':sheets,
             'x_mode':self.xmode.currentText(),'compare_enabled':self.compare_box.isChecked(),
             'cursors':{'x':self.cursors.x,'a':self.cursors.a,'b':self.cursors.b},
@@ -4817,7 +4817,7 @@ class MainWindow(QtWidgets.QMainWindow):
             logging.exception('Could not inspect autosave recovery file')
             return
         answer=QtWidgets.QMessageBox.question(self,'Recover autosaved workspace?',
-            'NHRA Tech Data found a newer recovery snapshot from a previous session.\n\nRecover it now?')
+            'NHRA Velocity found a newer recovery snapshot from a previous session.\n\nRecover it now?')
         if answer==QtWidgets.QMessageBox.Yes:
             self._recover_snapshot(force=True)
 
@@ -4836,7 +4836,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self,'Recovery failed',str(exc))
 
     def save_project(self):
-        path,_=QtWidgets.QFileDialog.getSaveFileName(self,'Save NHRA Tech Data workbook',self.project_path or f'analysis{PROJECT_EXT}',f'NHRA Tech Data Workbook (*{PROJECT_EXT})')
+        path,_=QtWidgets.QFileDialog.getSaveFileName(self,'Save NHRA Velocity workbook',self.project_path or f'analysis{PROJECT_EXT}',f'NHRA Velocity Workbook (*{PROJECT_EXT})')
         if not path:return
         if not path.lower().endswith(PROJECT_EXT):path+=PROJECT_EXT
         try:
@@ -4928,7 +4928,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if errors:QtWidgets.QMessageBox.warning(self,'Project opened with missing sessions','\n'.join(errors))
 
     def open_project(self):
-        path,_=QtWidgets.QFileDialog.getOpenFileName(self,'Open NHRA Tech Data workbook','',f'NHRA Tech Data Workbook (*{PROJECT_EXT});;All files (*.*)')
+        path,_=QtWidgets.QFileDialog.getOpenFileName(self,'Open NHRA Velocity workbook','',f'NHRA Velocity Workbook (*{PROJECT_EXT});;All files (*.*)')
         if not path:return
         try:
             obj=read_project_json(path)
@@ -4971,7 +4971,7 @@ def main():
         status=win.auth.status()
         if not (status.online_access_valid or status.offline_access_valid):
             QtWidgets.QMessageBox.critical(win,'NHRA Tech Services sign-in required',
-                'This protected NHRA Tech Data build requires an authorized NHRA Tech Services account.\n\n'
+                'This protected NHRA Velocity build requires an authorized NHRA Tech Services account.\n\n'
                 'The production authentication adapter is not yet bound in this development release, so the application will fail closed rather than run without authorization.')
             return 4
     win.show()

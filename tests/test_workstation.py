@@ -204,11 +204,11 @@ def test_bundled_data_pipeline_selftest_passes():
 
 def test_diagnostic_log_path_can_be_redirected(tmp_path, monkeypatch):
     from runlab.diagnostics import app_data_root, configure_logging
-    monkeypatch.setenv('NHRA_TECH_DATA_HOME',str(tmp_path/'state'))
+    monkeypatch.setenv('NHRA_VELOCITY_HOME',str(tmp_path/'state'))
     assert app_data_root()==(tmp_path/'state').resolve()
     path=configure_logging()
     assert path.parent.exists()
-    assert path.name=='nhra-tech-data.log'
+    assert path.name=='nhra-velocity.log'
 
 
 def test_prepare_plot_series_repairs_clock_reset_and_keeps_longest_ordered_segment():
@@ -366,7 +366,7 @@ def test_multi_run_envelope_aligns_canonical_channels_and_converts_units():
 def test_global_channel_preferences_persist_by_canonical_role(tmp_path, monkeypatch):
     import pandas as pd
     from runlab.preferences import set_channel_preference, get_channel_preference, preference_key
-    monkeypatch.setenv('NHRA_TECH_DATA_HOME',str(tmp_path/'state'))
+    monkeypatch.setenv('NHRA_VELOCITY_HOME',str(tmp_path/'state'))
     run=TelemetryRun(name='prefs',data=pd.DataFrame({'Time':[0.,1.],'RPM':[1000.,2000.]}),channel_map={'time_s':'Time','engine_rpm':'RPM'},units={'Time':'s','RPM':'rpm'},metadata={'original_channel_map':{'engine_rpm':'RPM'}})
     assert preference_key(run,'RPM')=='canonical:engine_rpm'
     set_channel_preference(run,'RPM',{'color':'#abcdef','width':2.2,'display_unit':'rpm'})

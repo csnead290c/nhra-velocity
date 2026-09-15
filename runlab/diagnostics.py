@@ -8,16 +8,16 @@ import platform
 
 
 def app_data_root() -> Path:
-    override=os.environ.get('NHRA_TECH_DATA_HOME')
+    override=os.environ.get('NHRA_VELOCITY_HOME') or os.environ.get('NHRA_TECH_DATA_HOME')
     if override:
         return Path(override).expanduser().resolve()
     system=platform.system().lower()
     if system=='windows':
         base=os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA')
-        return (Path(base) if base else Path.home()/'AppData'/'Local')/'NHRA'/'TechData'
+        return (Path(base) if base else Path.home()/'AppData'/'Local')/'NHRA'/'Velocity'
     if system=='darwin':
-        return Path.home()/'Library'/'Application Support'/'NHRA Tech Data'
-    return Path(os.environ.get('XDG_STATE_HOME',Path.home()/'.local'/'state'))/'nhra-tech-data'
+        return Path.home()/'Library'/'Application Support'/'NHRA Velocity'
+    return Path(os.environ.get('XDG_STATE_HOME',Path.home()/'.local'/'state'))/'nhra-velocity'
 
 
 def log_dir() -> Path:
@@ -25,7 +25,7 @@ def log_dir() -> Path:
 
 
 def configure_logging() -> Path:
-    path=log_dir()/'nhra-tech-data.log'
+    path=log_dir()/'nhra-velocity.log'
     logger=logging.getLogger()
     # Avoid duplicate handlers when main() is re-entered in development.
     if not any(isinstance(h,RotatingFileHandler) and Path(getattr(h,'baseFilename',''))==path for h in logger.handlers):

@@ -32,6 +32,7 @@ from urllib.parse import quote, urlencode, urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .transport import ProviderCapabilities
+from .version import __version__
 
 
 DEFAULT_TECH_SERVICES_BASE_URL = "https://nhratechservices.com"
@@ -103,7 +104,7 @@ class _SameOriginRedirectHandler(HTTPRedirectHandler):
 class TechServicesHttpClient:
     """Small GET-only client for the existing nhratechservices Bearer API."""
 
-    user_agent = "NHRA-Tech-Data/0.33"
+    user_agent = f"NHRA-Velocity/{__version__}"
 
     def __init__(self, config: TechServicesHttpConfig):
         self.config = config

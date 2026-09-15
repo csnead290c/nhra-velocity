@@ -1,8 +1,8 @@
-# NHRA Tech Data release and update strategy
+# NHRA Velocity release and update strategy
 
 ## User experience
 
-Normal users install **NHRA Tech Data** once through a signed Windows installer and launch it from the Start menu/desktop like any other Windows application. They do not need Python, Git, or a source checkout.
+Normal users install **NHRA Velocity** once through a signed Windows installer and launch it from the Start menu/desktop like any other Windows application. They do not need Python, Git, or a source checkout.
 
 The application may check a configured HTTPS `update.json` feed. When a newer release is available it presents release notes and lets the user install now or later. The application downloads the normal installer, verifies the exact byte count and SHA-256, optionally requires a valid Authenticode publisher signature, then launches the installer and exits. It never overwrites its running executable directly.
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Small, dependency-free update client for signed NHRA Tech Data releases.
+"""Small, dependency-free update client for signed NHRA Velocity releases.
 
 The application never replaces its own executable in-place. It downloads a
 normal Windows installer, verifies its size/SHA-256 (and optionally its Windows
@@ -97,7 +97,7 @@ class UpdateManifest:
     def validate(self) -> None:
         if self.schema != 1:
             raise ValueError(f"Unsupported update manifest schema {self.schema}")
-        if self.product != "NHRA Tech Data":
+        if self.product != "NHRA Velocity":
             raise ValueError(f"Unexpected update product {self.product!r}")
         parse_version(self.version)
         if self.channel not in {"stable", "beta", "development"}:
@@ -137,7 +137,7 @@ def configured_channel(env: Mapping[str, str] | None = None) -> str:
 
 
 def fetch_manifest(url: str, *, timeout_s: float = 8.0) -> UpdateManifest:
-    req = Request(url, headers={"User-Agent": f"NHRA-Tech-Data/{__version__}"})
+    req = Request(url, headers={"User-Agent": f"NHRA-Velocity/{__version__}"})
     with urlopen(req, timeout=timeout_s) as response:  # noqa: S310 - URL is explicit/configured HTTPS
         payload = json.loads(response.read().decode("utf-8"))
     return UpdateManifest.from_dict(payload)
@@ -173,9 +173,9 @@ def sha256_file(path: str | Path) -> str:
 def download_update(manifest: UpdateManifest, target_dir: str | Path | None = None) -> Path:
     target_root = Path(target_dir) if target_dir is not None else Path(tempfile.mkdtemp(prefix="nhra-tech-update-"))
     target_root.mkdir(parents=True, exist_ok=True)
-    filename = Path(manifest.installer_url.split("?", 1)[0]).name or f"NHRA-Tech-Data-{manifest.version}-Setup.exe"
+    filename = Path(manifest.installer_url.split("?", 1)[0]).name or f"NHRA-Velocity-{manifest.version}-Setup.exe"
     target = target_root / filename
-    req = Request(manifest.installer_url, headers={"User-Agent": f"NHRA-Tech-Data/{__version__}"})
+    req = Request(manifest.installer_url, headers={"User-Agent": f"NHRA-Velocity/{__version__}"})
     with urlopen(req, timeout=60.0) as response, target.open("wb") as out:  # noqa: S310
         while True:
             chunk = response.read(1024 * 1024)
@@ -222,5 +222,5 @@ def verify_windows_authenticode(path: str | Path, *, expected_subject: str | Non
 def launch_installer(path: str | Path) -> None:
     """Launch a verified installer. The caller should close the app afterward."""
     if os.name != "nt":
-        raise RuntimeError("NHRA Tech Data automatic installer launch is currently Windows-only")
+        raise RuntimeError("NHRA Velocity automatic installer launch is currently Windows-only")
     subprocess.Popen([str(Path(path))], close_fds=True)  # noqa: S603

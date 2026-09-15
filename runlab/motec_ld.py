@@ -398,7 +398,7 @@ def parse_motec_ld(path: str | Path) -> TelemetryRun:
         'native_rate_channels': True,
         'unit_provenance': unit_provenance,
         'original_channel_map': dict(cmap),
-        'parser': 'NHRA Tech Data native MoTeC LD reader',
+        'parser': 'NHRA Velocity native MoTeC LD reader',
     })
     run = TelemetryRun(
         name=path.stem,
