@@ -1,8 +1,12 @@
-# NHRA Tech Data — Development v0.37
+# NHRA Tech Data — Development v0.37.1
 
 NHRA Tech Data is a native desktop engineering workstation for NHRA telemetry, vehicle-performance analysis, synchronized evidence, and future incident reconstruction.
 
 
+
+## v0.37.1 Windows waveform-render hotfix
+
+The first Windows trial of v0.37 exposed a pyqtgraph compatibility regression (`GraphicsLayoutWidget` missing `autoRangeEnabled`) before the waveform could render. v0.37.1 removes the pyqtgraph implicit clip/downsample constructor flags that triggered that path and continues to use NHRA Tech Data's own peak-preserving `prepare_plot_series()` decimation. All v0.37 cursor-cache and workflow improvements remain enabled.
 
 ## v0.37 interactive performance + everyday waveform workflow
 
