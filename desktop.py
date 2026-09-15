@@ -740,11 +740,11 @@ class CatalogRunDetails(QtWidgets.QWidget):
 
 
 class RunWorkspacePanel(QtWidgets.QWidget):
-    """Run-first engineering workspace around one authoritative NHRA Run.
+    """Run-first engineering workspace with progressive disclosure.
 
-    This panel intentionally shows canonical timing/weather beside local evidence
-    and derived engineering products.  It never changes Run ownership or infers a
-    Run from a filename.
+    The ordinary view stays intentionally compact: official Run context first,
+    attached evidence/reports second, engineering/model detail last. Advanced
+    actions remain available without occupying permanent screen space.
     """
     openRunRequested = QtCore.Signal(str)
     attachTelemetryRequested = QtCore.Signal(str)
@@ -755,21 +755,39 @@ class RunWorkspacePanel(QtWidgets.QWidget):
         super().__init__(parent);self.catalog=catalog;self.run_id='';self.state=None
         lay=QtWidgets.QVBoxLayout(self);lay.setContentsMargins(4,4,4,4)
         self.title=QtWidgets.QLabel('Select an authoritative Run');font=self.title.font();font.setBold(True);font.setPointSize(font.pointSize()+1);self.title.setFont(font);self.title.setWordWrap(True);lay.addWidget(self.title)
-        self.subtitle=QtWidgets.QLabel('Official timing/weather, telemetry evidence, class defaults and derived reports stay attached to the Run.');self.subtitle.setWordWrap(True);self.subtitle.setStyleSheet('color:#aeb4bb');lay.addWidget(self.subtitle)
-        row=QtWidgets.QHBoxLayout();self.open_btn=QtWidgets.QPushButton('Open Telemetry');self.attach_btn=QtWidgets.QPushButton('Attach Telemetry…');self.profile_btn=QtWidgets.QPushButton('Apply Class Layout');self.report_btn=QtWidgets.QPushButton('Generate Report');self.refresh_btn=QtWidgets.QPushButton('Refresh')
-        for b in (self.open_btn,self.attach_btn,self.profile_btn,self.report_btn):row.addWidget(b)
-        row.addStretch(1);row.addWidget(self.refresh_btn);lay.addLayout(row)
+        self.subtitle=QtWidgets.QLabel('Official timing, weather and attached telemetry stay centered on one Run.');self.subtitle.setWordWrap(True);self.subtitle.setStyleSheet('color:#aeb4bb');lay.addWidget(self.subtitle)
+
+        row=QtWidgets.QHBoxLayout()
+        self.open_btn=QtWidgets.QPushButton('Open Telemetry')
+        self.attach_btn=QtWidgets.QPushButton('Attach Telemetry…')
+        self.more_btn=QtWidgets.QToolButton();self.more_btn.setText('More ▾');self.more_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.more_menu=QtWidgets.QMenu(self.more_btn)
+        self.profile_action=self.more_menu.addAction('Apply Class Layout')
+        self.report_action=self.more_menu.addAction('Generate Standard Report')
+        self.more_menu.addSeparator();self.refresh_action=self.more_menu.addAction('Refresh')
+        self.more_btn.setMenu(self.more_menu)
+        row.addWidget(self.open_btn);row.addWidget(self.attach_btn);row.addWidget(self.more_btn);row.addStretch(1);lay.addLayout(row)
+
         self.tabs=QtWidgets.QTabWidget();lay.addWidget(self.tabs,1)
-        self.overview=QtWidgets.QTreeWidget();self.overview.setHeaderLabels(['Field','Value','Unit / Source']);self.overview.setAlternatingRowColors(True);self.overview.header().setSectionResizeMode(0,QtWidgets.QHeaderView.ResizeToContents);self.overview.header().setSectionResizeMode(1,QtWidgets.QHeaderView.Stretch);self.overview.header().setSectionResizeMode(2,QtWidgets.QHeaderView.ResizeToContents);self.tabs.addTab(self.overview,'Overview')
-        self.assets=QtWidgets.QTableWidget(0,6);self.assets.setHorizontalHeaderLabels(['Type','File','Vendor','Authority','Cache','Time mapping']);self.assets.verticalHeader().setVisible(False);self.assets.horizontalHeader().setSectionResizeMode(1,QtWidgets.QHeaderView.Stretch);self.tabs.addTab(self.assets,'Evidence')
-        self.engineering=QtWidgets.QTreeWidget();self.engineering.setHeaderLabels(['Input / Result','Value','Unit','Provenance']);self.engineering.setAlternatingRowColors(True);self.engineering.header().setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch);self.tabs.addTab(self.engineering,'Engineering / RSA')
-        self.reports=QtWidgets.QTableWidget(0,7);self.reports.setHorizontalHeaderLabels(['Report','Profile','Version','Generated','Source asset','Fingerprint','Vs previous']);self.reports.verticalHeader().setVisible(False);self.reports.horizontalHeader().setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch);self.tabs.addTab(self.reports,'Reports')
-        self.models=QtWidgets.QTableWidget(0,5);self.models.setHorizontalHeaderLabels(['Model snapshot','Type','Version','Created','Quality']);self.models.verticalHeader().setVisible(False);self.models.horizontalHeader().setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch);self.tabs.addTab(self.models,'Models')
-        self.open_btn.clicked.connect(lambda:self.openRunRequested.emit(self.run_id) if self.run_id else None);self.attach_btn.clicked.connect(lambda:self.attachTelemetryRequested.emit(self.run_id) if self.run_id else None);self.profile_btn.clicked.connect(self._apply_profile);self.report_btn.clicked.connect(self._generate_report);self.refresh_btn.clicked.connect(self.refresh)
+        self.overview=QtWidgets.QTreeWidget();self.overview.setHeaderLabels(['Field','Value','Unit / Source']);self.overview.setAlternatingRowColors(True);self.overview.header().setSectionResizeMode(0,QtWidgets.QHeaderView.ResizeToContents);self.overview.header().setSectionResizeMode(1,QtWidgets.QHeaderView.Stretch);self.overview.header().setSectionResizeMode(2,QtWidgets.QHeaderView.ResizeToContents);self.tabs.addTab(self.overview,'Summary')
+
+        data_wrap=QtWidgets.QWidget();dv=QtWidgets.QVBoxLayout(data_wrap);dv.setContentsMargins(0,0,0,0)
+        evidence_box=QtWidgets.QGroupBox('Attached data');ev=QtWidgets.QVBoxLayout(evidence_box)
+        self.assets=QtWidgets.QTableWidget(0,5);self.assets.setHorizontalHeaderLabels(['Type','File','Vendor','Authority','Cache']);self.assets.verticalHeader().setVisible(False);self.assets.horizontalHeader().setSectionResizeMode(1,QtWidgets.QHeaderView.Stretch);ev.addWidget(self.assets)
+        dv.addWidget(evidence_box,2)
+        reports_box=QtWidgets.QGroupBox('Standard reports');rv=QtWidgets.QVBoxLayout(reports_box)
+        self.reports=QtWidgets.QTableWidget(0,3);self.reports.setHorizontalHeaderLabels(['Report','Generated','Status']);self.reports.verticalHeader().setVisible(False);self.reports.horizontalHeader().setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch);rv.addWidget(self.reports)
+        dv.addWidget(reports_box,1);self.tabs.addTab(data_wrap,'Data')
+
+        self.engineering=QtWidgets.QTreeWidget();self.engineering.setHeaderLabels(['Engineering / Model','Value','Unit','Provenance']);self.engineering.setAlternatingRowColors(True);self.engineering.header().setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch);self.tabs.addTab(self.engineering,'Engineering')
+
+        self.open_btn.clicked.connect(lambda:self.openRunRequested.emit(self.run_id) if self.run_id else None)
+        self.attach_btn.clicked.connect(lambda:self.attachTelemetryRequested.emit(self.run_id) if self.run_id else None)
+        self.profile_action.triggered.connect(self._apply_profile);self.report_action.triggered.connect(self._generate_report);self.refresh_action.triggered.connect(self.refresh)
         self._enable_actions(False)
 
     def _enable_actions(self,enabled:bool):
-        for b in (self.open_btn,self.attach_btn,self.profile_btn,self.report_btn):b.setEnabled(bool(enabled))
+        for w in (self.open_btn,self.attach_btn,self.more_btn):w.setEnabled(bool(enabled))
 
     def set_run(self,run_id:str):
         self.run_id=str(run_id or '');self.refresh()
@@ -804,39 +822,58 @@ class RunWorkspacePanel(QtWidgets.QWidget):
         self.generateReportRequested.emit(self.run_id,str(report))
 
     def refresh(self):
-        self.overview.clear();self.assets.setRowCount(0);self.engineering.clear();self.reports.setRowCount(0);self.models.setRowCount(0);self.state=None
+        self.overview.clear();self.assets.setRowCount(0);self.engineering.clear();self.reports.setRowCount(0);self.state=None
         if not self.run_id:
-            self.title.setText('Select an authoritative Run');self._enable_actions(False);return
+            self.title.setText('Select an authoritative Run');self.subtitle.setText('Official timing, weather and attached telemetry stay centered on one Run.');self._enable_actions(False);return
         try:self.state=build_run_workspace(self.catalog,self.run_id)
         except Exception as exc:
             self.title.setText(f'Run workspace unavailable — {exc}');self._enable_actions(False);return
         st=self.state;r=st.run;self._enable_actions(True)
         identity=' · '.join(x for x in (str(r.get('driver_name') or ''),str(r.get('category') or ''),str(r.get('round') or '')) if x)
         self.title.setText(f"{r.get('event_name') or 'Run'} — {identity or r.get('run_key') or self.run_id}")
-        report_status='reports complete' if not st.missing_expected_reports else ('report pending: '+', '.join(st.missing_expected_reports))
-        self.subtitle.setText(f"{st.profile_label} profile · {st.finish_distance_ft} ft finish · {len(st.telemetry_assets)} telemetry asset(s) · {report_status}")
-        g=self._group('Identity / Authority')
-        for label,key in [('Run key','run_key'),('Driver','driver_name'),('Category','category'),('Car number','car_number'),('Round','round'),('Lane','lane'),('Date / time','run_datetime'),('Sync state','sync_state')]:self._ov(g,label,r.get(key),'Tech Services' if r.get('sync_state')=='synced' else 'catalog')
+        if st.expected_reports:
+            report_status='report current' if not st.missing_expected_reports else 'report pending'
+        else:
+            report_status='no standard report'
+        self.subtitle.setText(f"{st.profile_label} · {len(st.telemetry_assets)} telemetry file(s) · {report_status}")
+
+        g=self._group('Run')
+        for label,key in [('Driver','driver_name'),('Category','category'),('Car number','car_number'),('Round','round'),('Lane','lane'),('Date / time','run_datetime')]:self._ov(g,label,r.get(key),'Tech Services' if r.get('sync_state')=='synced' else 'catalog')
         g=self._group('Official Timing')
         for rec in st.timing:self._ov(g,rec.label,rec.value,f'{rec.unit} · {rec.provenance}'.strip(' ·'))
-        g=self._group('Weather / Conditions')
-        for rec in st.weather:self._ov(g,rec.label,rec.value,f'{rec.unit} · {rec.provenance}'.strip(' ·'))
+        primary_weather={'temperature_f','barometer_inhg','humidity_pct','wind_mph','wind_angle_deg'}
+        weather_rows=[rec for rec in st.weather if rec.key in primary_weather]
+        if weather_rows:
+            g=self._group('Weather')
+            for rec in weather_rows:self._ov(g,rec.label,rec.value,f'{rec.unit} · {rec.provenance}'.strip(' ·'))
         self.overview.expandAll()
 
         self.assets.setRowCount(len(st.assets))
         for row,a in enumerate(st.assets):
             meta=a.get('metadata') or {};mapping=self.catalog.get_time_mapping(str(a['id'])) or {}
             authority='Tech Services' if a.get('source_kind')=='tech_services' else ('Local Run attachment' if meta.get('attachment_mode')=='local_working_copy' else str(a.get('source_kind') or 'local'))
-            cached='verified managed' if a.get('storage_mode')=='managed' and self.catalog.asset_cache_valid(str(a['id'])) else ('local' if a.get('local_path') else 'remote')
+            cached='verified' if a.get('storage_mode')=='managed' and self.catalog.asset_cache_valid(str(a['id'])) else ('local' if a.get('local_path') else 'remote')
             tm='' if not mapping else f"run = {float(mapping.get('scale') or 1):.7g}×asset {float(mapping.get('offset_s') or 0):+.4f}s"
-            for col,val in enumerate((a.get('asset_type',''),a.get('filename',''),a.get('vendor',''),authority,cached,tm)):self.assets.setItem(row,col,QtWidgets.QTableWidgetItem(str(val or '')))
+            vals=(a.get('asset_type',''),a.get('filename',''),a.get('vendor',''),authority,cached)
+            for col,val in enumerate(vals):
+                item=QtWidgets.QTableWidgetItem(str(val or ''))
+                detail=' · '.join(x for x in (str(a.get('remote_id') or ''),tm) if x)
+                if detail:item.setToolTip(detail)
+                self.assets.setItem(row,col,item)
 
         current=self.engineering.invisibleRootItem()
-        measured=QtWidgets.QTreeWidgetItem(['Run engineering values','','','']);f=measured.font(0);f.setBold(True);measured.setFont(0,f);current.addChild(measured)
+        measured=QtWidgets.QTreeWidgetItem(['Run values','','','']);f=measured.font(0);f.setBold(True);measured.setFont(0,f);current.addChild(measured)
         for rec in st.engineering:
             measured.addChild(QtWidgets.QTreeWidgetItem([str(rec.get('key') or ''),self._value_text(rec.get('value')),str(rec.get('unit') or ''),str(rec.get('provenance') or '')]))
-        defaults=QtWidgets.QTreeWidgetItem([f'{st.profile_label} standardized RSA seeds','','','class profile defaults']);f=defaults.font(0);f.setBold(True);defaults.setFont(0,f);current.addChild(defaults)
+        defaults=QtWidgets.QTreeWidgetItem([f'{st.profile_label} standard inputs','','','class defaults']);f=defaults.font(0);f.setBold(True);defaults.setFont(0,f);current.addChild(defaults)
         for rec in st.profile_defaults:defaults.addChild(QtWidgets.QTreeWidgetItem([rec.label,self._value_text(rec.value),rec.unit,rec.provenance]))
+        if st.model_snapshots:
+            models=QtWidgets.QTreeWidgetItem(['Model snapshots','','','']);f=models.font(0);f.setBold(True);models.setFont(0,f);current.addChild(models)
+            for rec in st.model_snapshots:
+                q=rec.get('quality') or {};qtext=', '.join(f'{k}={v}' for k,v in list(q.items())[:2])
+                label=str(rec.get('name') or rec.get('model_type') or 'Model snapshot')
+                value=' · '.join(x for x in (str(rec.get('model_type') or ''),str(rec.get('model_version') or '')) if x)
+                models.addChild(QtWidgets.QTreeWidgetItem([label,value,'',qtext or str(rec.get('created_at') or '')]))
         self.engineering.expandAll()
 
         self.reports.setRowCount(len(st.reports))
@@ -845,28 +882,21 @@ class RunWorkspacePanel(QtWidgets.QWidget):
         for row,rec in enumerate(st.reports):
             rtype=str(rec.get('report_type') or '')
             comp=st.report_comparisons.get(rtype) if first_by_type.get(rtype) is rec else None
-            status='—'
-            tooltip=''
+            status='—';tooltip=[]
             if comp is not None:
                 alerts=int(comp.get('alerts') or 0);status=f'CHECK {alerts}' if alerts else 'stable'
                 prev=' · '.join(x for x in (str(comp.get('previous_event_name') or ''),str(comp.get('previous_run_key') or ''),str(comp.get('previous_run_datetime') or '')) if x)
-                detail=[]
+                if prev:tooltip.append('Previous: '+prev)
                 for rr in comp.get('rows') or []:
                     dr=rr.get('delta_rpm');dt=rr.get('delta_time_s')
-                    if dr is not None or dt is not None:detail.append(f"Shift {rr.get('shift')}: ΔRPM={'' if dr is None else f'{float(dr):+.0f}'}, Δt={'' if dt is None else f'{float(dt):+.4f}s'}")
-                tooltip=('Previous: '+prev+'\n' if prev else '')+'\n'.join(detail)
-            vals=(rtype,rec.get('profile',''),rec.get('report_version',''),rec.get('generated_at') or rec.get('created_at',''),rec.get('source_asset_id') or '',str(rec.get('fingerprint_sha256') or '')[:12],status)
+                    if dr is not None or dt is not None:tooltip.append(f"Shift {rr.get('shift')}: ΔRPM={'' if dr is None else f'{float(dr):+.0f}'}, Δt={'' if dt is None else f'{float(dt):+.4f}s'}")
+            generated=rec.get('generated_at') or rec.get('created_at','')
+            vals=(rtype,generated,status)
+            detail='\n'.join(tooltip+[f"Profile: {rec.get('profile','')}",f"Version: {rec.get('report_version','')}",f"Fingerprint: {str(rec.get('fingerprint_sha256') or '')[:12]}"])
             for col,val in enumerate(vals):
-                item=QtWidgets.QTableWidgetItem(str(val or ''))
-                if tooltip:item.setToolTip(tooltip)
-                if col==6 and str(val).startswith('CHECK'):item.setForeground(QtGui.QColor('#ffb454'))
+                item=QtWidgets.QTableWidgetItem(str(val or ''));item.setToolTip(detail)
+                if col==2 and str(val).startswith('CHECK'):item.setForeground(QtGui.QColor('#ffb454'))
                 self.reports.setItem(row,col,item)
-
-        self.models.setRowCount(len(st.model_snapshots))
-        for row,rec in enumerate(st.model_snapshots):
-            q=rec.get('quality') or {};qtext=', '.join(f'{k}={v}' for k,v in list(q.items())[:3])
-            vals=(rec.get('name',''),rec.get('model_type',''),rec.get('model_version',''),rec.get('created_at',''),qtext)
-            for col,val in enumerate(vals):self.models.setItem(row,col,QtWidgets.QTableWidgetItem(str(val or '')))
 
 
 class AssetBrowser(QtWidgets.QWidget):
@@ -951,19 +981,34 @@ class ChannelTree(QtWidgets.QTreeWidget):
         self.customContextMenuRequested.connect(self._menu)
         self._run: Optional[TelemetryRun] = None
 
-    def set_run(self, run: Optional[TelemetryRun], filter_text: str = ""):
+    def set_run(self, run: Optional[TelemetryRun], filter_text: str = "", view_mode: str = "essentials"):
         self._run = run; self.clear()
         if run is None: return
+        mode=str(view_mode or 'essentials').lower()
+        query=str(filter_text or '').strip()
+        p=infer_profile(run)
+        essential=set(resolve_profile_channels(run,p.key,limit=12))
+        if p.key=='generic_drag':
+            essential.update(choose_default_plot_channels(run,limit=10))
         groups: Dict[str, QtWidgets.QTreeWidgetItem] = {}
         labels={
             'angular_speed':'Rotational Speed','speed':'Vehicle Speed','acceleration':'Acceleration',
             'pressure':'Pressure','temperature':'Temperature','power':'Power','torque':'Torque',
             'voltage':'Electrical','current':'Electrical','ratio':'Ratios / Percent',
         }
-        for rec in channel_catalog(run, filter_text):
+        for rec in channel_catalog(run, query):
             pref=get_channel_preference(run,rec.name)
             favorite=bool(pref.get('favorite',False))
-            group_name = '★ Favorites' if favorite else ('Calculated' if rec.source_kind=='calculated' else labels.get(rec.dimension,'Other'))
+            # The ordinary trackside view is intentionally small. A search is
+            # treated as an explicit request to look across every channel.
+            if mode=='essentials' and not query and not favorite and rec.name not in essential:
+                continue
+            if favorite:
+                group_name='★ Favorites'
+            elif rec.name in essential:
+                group_name=f'Standard — {p.label}'
+            else:
+                group_name='Calculated' if rec.source_kind=='calculated' else labels.get(rec.dimension,'Other')
             parent=groups.get(group_name)
             if parent is None:
                 parent=QtWidgets.QTreeWidgetItem([group_name]); parent.setFlags(parent.flags() & ~QtCore.Qt.ItemIsDragEnabled)
@@ -971,11 +1016,12 @@ class ChannelTree(QtWidgets.QTreeWidget):
             rate=f"{rec.sample_rate_hz:g}" if rec.sample_rate_hz else ''
             item=QtWidgets.QTreeWidgetItem([rec.name,rec.alias,display_label(rec.unit),rate,rec.canonical_role,rec.source_kind.capitalize()])
             item.setData(0,QtCore.Qt.UserRole,rec.name); parent.addChild(item)
-        fav=groups.get('★ Favorites')
-        if fav is not None:
-            idx=self.indexOfTopLevelItem(fav)
-            if idx>0:
-                fav=self.takeTopLevelItem(idx); self.insertTopLevelItem(0,fav)
+        for priority in (f'Standard — {p.label}','★ Favorites'):
+            parent=groups.get(priority)
+            if parent is not None:
+                idx=self.indexOfTopLevelItem(parent)
+                if idx>0:
+                    parent=self.takeTopLevelItem(idx); self.insertTopLevelItem(0,parent)
         self.expandAll()
 
     def _double(self, item, _column):
@@ -3413,25 +3459,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.a_tile=QtGui.QAction('Tile Dock Displays',self)
 
     def _build_toolbar(self):
-        # The toolbar is for the frequent path only.  Everything else remains
-        # available in menus and Ctrl+K rather than consuming permanent width.
+        # Permanent toolbar = the trackside path. Advanced layout/report/tools
+        # live in menus or Ctrl+K so the app does not turn into a cockpit.
         tb=self.addToolBar('Main'); tb.setObjectName('MainToolbar'); tb.setMovable(False); tb.setIconSize(QtCore.QSize(18,18))
-        tb.addAction(self.a_open); tb.addAction(self.a_save); tb.addSeparator()
-        tb.addAction(self.a_sheet); tb.addAction(self.a_command_palette); tb.addSeparator()
+        tb.addAction(self.a_open); tb.addAction(self.a_save); tb.addAction(self.a_fit_run); tb.addSeparator()
         tb.addWidget(QtWidgets.QLabel(' Run '))
-        self.run_selector=QtWidgets.QComboBox(); self.run_selector.setMinimumContentsLength(14); self.run_selector.setMinimumWidth(165); self.run_selector.setToolTip('Active/Main telemetry session'); self.run_selector.currentIndexChanged.connect(self._toolbar_run_changed); tb.addWidget(self.run_selector)
-        tb.addSeparator(); tb.addWidget(QtWidgets.QLabel(' Profile '))
-        self.profile_selector=QtWidgets.QComboBox(); self.profile_selector.setToolTip('Apply an NHRA class-specific standard worksheet layout and RSA seed defaults'); self.profile_selector.addItem('Auto / Generic','');
-        for rp in RUN_PROFILES:
-            if rp.key!='generic_drag': self.profile_selector.addItem(rp.label,rp.key)
-        self.profile_selector.activated.connect(self._profile_selected); tb.addWidget(self.profile_selector)
-        tb.addSeparator(); tb.addWidget(QtWidgets.QLabel(' Quick Graph '))
-        self.quick_graph=QtWidgets.QComboBox(); self.quick_graph.addItem('— choose —'); self.quick_graph.addItems(list(QUICK_GRAPH_PRESETS)); self.quick_graph.activated.connect(self._quick_graph_selected); tb.addWidget(self.quick_graph)
-        tb.addSeparator(); tb.addWidget(QtWidgets.QLabel(' X axis '))
+        self.run_selector=QtWidgets.QComboBox(); self.run_selector.setMinimumContentsLength(14); self.run_selector.setMinimumWidth(180); self.run_selector.setToolTip('Active telemetry session'); self.run_selector.currentIndexChanged.connect(self._toolbar_run_changed); tb.addWidget(self.run_selector)
+        tb.addSeparator(); tb.addWidget(QtWidgets.QLabel(' X '))
         self.xmode=QtWidgets.QComboBox(); self.xmode.addItems(['Time from Launch','Distance from Launch','Normalized Run %','Logger Time','Sample Index']); self.xmode.currentTextChanged.connect(self._xmode_changed); tb.addWidget(self.xmode)
         tb.addSeparator(); self.compare_box=QtWidgets.QCheckBox('Compare'); self.compare_box.setChecked(False); self.compare_box.stateChanged.connect(self._compare_changed); tb.addWidget(self.compare_box)
-        tb.addWidget(QtWidgets.QLabel(' Ref '))
+        self.reference_label=QtWidgets.QLabel(' Ref ');tb.addWidget(self.reference_label)
         self.reference_selector=QtWidgets.QComboBox(); self.reference_selector.setMinimumContentsLength(12); self.reference_selector.setMinimumWidth(150); self.reference_selector.setToolTip('Reference session used by waveform compare'); self.reference_selector.currentIndexChanged.connect(self._toolbar_reference_changed); tb.addWidget(self.reference_selector)
+        self.reference_label.setVisible(False);self.reference_selector.setVisible(False)
 
     def _build_docks(self):
         # Authoritative Tech Services Run/Asset mirror with local analysis cache.
@@ -3457,12 +3496,20 @@ class MainWindow(QtWidgets.QMainWindow):
         # Sessions / compare sets
         self.session_tree=SessionDock(self.store); self.session_tree.activeRequested.connect(self.store.set_active); self.session_tree.roleChanged.connect(self._role_changed); self.session_tree.alignmentChanged.connect(self._alignment_changed); self.session_tree.autoAlignRequested.connect(self._auto_align_session); self.session_tree.renameRequested.connect(self._rename_session); self.session_tree.removeRequested.connect(self._remove_session)
         d=QtWidgets.QDockWidget('Sessions / Compare Sets',self); d.setObjectName('SessionsDock'); d.setWidget(self.session_tree); self.addDockWidget(QtCore.Qt.LeftDockWidgetArea,d)
-        # Parameter browser with search
+        # Channel browser defaults to the small class-relevant set. The full
+        # logger catalog is one selector away, and any search spans all channels.
         chwrap=QtWidgets.QWidget(); v=QtWidgets.QVBoxLayout(chwrap); v.setContentsMargins(4,4,4,4)
-        self.channel_search=QtWidgets.QLineEdit(); self.channel_search.setPlaceholderText('Search channels / aliases / roles / units…  (Ctrl+P)'); v.addWidget(self.channel_search)
+        filter_row=QtWidgets.QHBoxLayout()
+        self.channel_scope=QtWidgets.QComboBox();self.channel_scope.addItem('Essentials','essentials');self.channel_scope.addItem('All channels','all');self.channel_scope.setToolTip('Essentials shows favorites plus the standard channels for the active run type.')
+        self.channel_search=QtWidgets.QLineEdit(); self.channel_search.setPlaceholderText('Search channels…  (Ctrl+P)')
+        filter_row.addWidget(self.channel_scope);filter_row.addWidget(self.channel_search,1);v.addLayout(filter_row)
         self.search_shortcut=QtGui.QShortcut(QtGui.QKeySequence('Ctrl+P'), self); self.search_shortcut.activated.connect(self._focus_parameter_search); self.quick_access_shortcut=QtGui.QShortcut(QtGui.QKeySequence('Ctrl+Q'),self); self.quick_access_shortcut.activated.connect(self._focus_parameter_search)
-        self.channels=ChannelTree(); self.channels.channelActivated.connect(self._channel_add); self.channels.channelPropertiesRequested.connect(self._channel_properties); self.channels.channelAliasRequested.connect(self._set_channel_alias); self.channels.channelFavoriteRequested.connect(self._set_channel_favorite); self.channels.calculatedChannelDeleteRequested.connect(self._delete_math_channel); v.addWidget(self.channels,1); self.channel_search.textChanged.connect(lambda t:self.channels.set_run(self.store.active.run if self.store.active else None,t))
-        d=QtWidgets.QDockWidget('Channel Explorer',self); d.setObjectName('ParametersDock'); d.setWidget(chwrap); self.addDockWidget(QtCore.Qt.LeftDockWidgetArea,d)
+        self.channels=ChannelTree(); self.channels.channelActivated.connect(self._channel_add); self.channels.channelPropertiesRequested.connect(self._channel_properties); self.channels.channelAliasRequested.connect(self._set_channel_alias); self.channels.channelFavoriteRequested.connect(self._set_channel_favorite); self.channels.calculatedChannelDeleteRequested.connect(self._delete_math_channel); v.addWidget(self.channels,1)
+        self.channel_search.textChanged.connect(lambda _t:self._refresh_channel_explorer());self.channel_scope.currentIndexChanged.connect(lambda _i:self._refresh_channel_explorer())
+        params_dock=QtWidgets.QDockWidget('Channel Explorer',self); params_dock.setObjectName('ParametersDock'); params_dock.setWidget(chwrap); self.addDockWidget(QtCore.Qt.LeftDockWidgetArea,params_dock)
+        # Run selection and channel selection are the two ordinary entry points;
+        # keep them in one left-side tab group rather than two permanent panes.
+        self.tabifyDockWidget(run_dock,params_dock);params_dock.raise_()
         # Run metadata / setup sheet
         self.metadata=MetadataEditor(self.store); d=QtWidgets.QDockWidget('Run Details / Setup',self); d.setObjectName('MetadataDock'); d.setWidget(self.metadata); self.addDockWidget(QtCore.Qt.RightDockWidgetArea,d)
         # Audit always available at app level
@@ -3485,20 +3532,23 @@ class MainWindow(QtWidgets.QMainWindow):
         if not docks:
             return
         visible = {
-            'simple': {'ParametersDock'},
+            'simple': {'RunBrowserDock','ParametersDock','RunWorkspaceDock'},
             'investigation': {'RunBrowserDock','SessionsDock','ParametersDock','MetadataDock','AuditDock'},
             'full': set(docks),
         }.get(mode, {'ParametersDock'})
         for name, dock in docks.items():
             dock.setVisible(name in visible)
-        param = docks.get('ParametersDock')
-        if param is not None and param.isVisible():
-            try:
-                self.resizeDocks([param], [300], QtCore.Qt.Horizontal)
-            except Exception:
-                pass
+        left = docks.get('ParametersDock')
+        right = docks.get('RunWorkspaceDock')
+        if left is not None and left.isVisible():
+            try:self.resizeDocks([left], [300], QtCore.Qt.Horizontal)
+            except Exception:pass
+            if mode=='simple':left.raise_()
+        if right is not None and right.isVisible():
+            try:self.resizeDocks([right], [360], QtCore.Qt.Horizontal)
+            except Exception:pass
         self.statusBar().showMessage(
-            {'simple':'Simple workspace — waveform + channels',
+            {'simple':'Simple workspace — Run + waveform + essential channels',
              'investigation':'Investigation workspace',
              'full':'Full engineering workspace'}.get(mode, 'Workspace updated'),
             3000,
@@ -3630,6 +3680,8 @@ class MainWindow(QtWidgets.QMainWindow):
         for i in range(self.worksheets.count()):
             for w in self.worksheets.widget(i).waveforms:w.compare=enabled
         self.reference_selector.setEnabled(enabled and self.reference_selector.count()>1)
+        if hasattr(self,'reference_label'):self.reference_label.setVisible(enabled)
+        self.reference_selector.setVisible(enabled)
         if assigned:
             self.store.changed.emit()
         else:
@@ -3833,35 +3885,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self.xmode.setCurrentText('Time from Launch')
         ws=self.current_sheet()
         ws.clear_displays()
-        made=0
-        for group_name, _roles in p.waveform_groups:
-            channels=resolve_profile_channels(h.run,p.key,group=group_name)
-            if not channels:continue
-            w=ws.add_waveform()
-            w.channels=channels
-            w.layout_mode.setCurrentText('Stacked Channels')
-            w.setToolTip(f'{p.label} — {group_name}')
-            w.refresh(); made+=1
-        if not made:
-            w=ws.add_waveform();w.channels=choose_default_plot_channels(h.run,limit=6);w.refresh()
-        # Pro Stock gets its standardized derived shift summary as soon as the
-        # user explicitly applies the class profile. It is workbook metadata,
-        # not a modification of the RacePak/Holley/MoTeC source.
-        report_note=''
-        if p.key=='pro_stock':
-            try:
-                report=attach_shift_report(h.run,profile='pro_stock')
-                if h.catalog_run_id:
-                    self.catalog.save_run_report(h.catalog_run_id,report,source_asset_id=h.catalog_asset_id or None,label='Pro Stock Shift Report')
-                    if hasattr(self,'run_workspace'):self.run_workspace.set_run(h.catalog_run_id)
-                report_note=f"; shift report {len(report.get('events',[]))} event(s)"
-            except Exception as exc:
-                report_note=f'; shift report pending ({exc})'
+        # Standard layouts are deliberately one useful worksheet, not a wall of
+        # graphs. Class-specific quick graphs remain available when more depth is
+        # needed.
+        channels=resolve_profile_channels(h.run,p.key,limit=8)
+        if not channels:channels=choose_default_plot_channels(h.run,limit=6)
+        w=ws.add_waveform();w.channels=channels;w.layout_mode.setCurrentText('Stacked Channels');w.setToolTip(f'{p.label} — standard');w.refresh()
+        # Layout application stays side-effect free beyond display/profile seed
+        # choices. Standard reports are generated explicitly from Run Workspace.
         self.store.changed.emit()
         self._refresh_profile_selector()
         QtCore.QTimer.singleShot(0,self._fit_current_run)
         seed_note=f'; {len(applied)} RSA class defaults seeded' if applied else ''
-        self.statusBar().showMessage(f'Applied {p.label} standard layout — {made or 1} waveform group(s){seed_note}{report_note}',7000)
+        self.statusBar().showMessage(f'Applied {p.label} standard layout — {len(channels)} core channel(s){seed_note}',7000)
 
     def _pro_stock_shift_report(self):
         h=self.store.active
@@ -3952,6 +3988,12 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         QtWidgets.QMessageBox.information(self,'Tech Services Integration Status',text)
 
+    def _refresh_channel_explorer(self):
+        run=self.store.active.run if self.store.active else None
+        scope=str(self.channel_scope.currentData() or 'essentials') if hasattr(self,'channel_scope') else 'essentials'
+        text=self.channel_search.text() if hasattr(self,'channel_search') else ''
+        self.channels.set_run(run,text,scope)
+
     def _focus_parameter_search(self):
         self.channel_search.setFocus(QtCore.Qt.ShortcutFocusReason)
         self.channel_search.selectAll()
@@ -3995,7 +4037,7 @@ class MainWindow(QtWidgets.QMainWindow):
             pref.pop('favorite',None)
             if pref:set_channel_preference(h.run,channel,pref)
             else:clear_channel_preference(h.run,channel)
-        self.channels.set_run(h.run,self.channel_search.text())
+        self._refresh_channel_explorer()
         self.statusBar().showMessage(('Added to' if enabled else 'Removed from')+f' Favorites: {channel}',3000)
 
     def _set_channel_alias(self, channel):
@@ -4006,7 +4048,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not ok:return
         try:
             set_channel_alias(h.run,channel,str(value).strip())
-            self.store.changed.emit();self.channels.set_run(h.run,self.channel_search.text())
+            self.store.changed.emit();self._refresh_channel_explorer()
         except Exception as exc:QtWidgets.QMessageBox.warning(self,'Channel Alias',str(exc))
 
     def _delete_math_channel(self, channel):
@@ -4849,7 +4891,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if d.objectName()=='AuditDock':d.show();d.raise_();break
 
     def _active_changed(self,handle):
-        run=handle.run if handle else None; self.channels.set_run(run,self.channel_search.text()); self.metadata.refresh(); self.audit.refresh()
+        run=handle.run if handle else None; self._refresh_channel_explorer(); self.metadata.refresh(); self.audit.refresh()
         if hasattr(self,'run_browser'): self.run_browser.refresh()
         if hasattr(self,'case_browser'): self.case_browser.refresh()
         if hasattr(self,'case_timeline'): self.case_timeline.refresh()
@@ -4865,7 +4907,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 w=ws.waveforms[0]
                 available=set(_visible_channel_names(run))
                 if not w.channels or not any(c in available for c in w.channels):
-                    w.channels=list(report.default_channels)
+                    p=infer_profile(run)
+                    preferred=resolve_profile_channels(run,p.key,limit=8) if p.key!='generic_drag' else []
+                    w.channels=list(preferred or report.default_channels)
                     w.refresh()
                     QtCore.QTimer.singleShot(0,w._fit_run)
             self._refresh_profile_selector()

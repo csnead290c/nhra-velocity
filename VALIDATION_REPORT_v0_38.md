@@ -1,14 +1,14 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.5**
+Validated build: **0.38.0-dev.6**
 
 ## Scope
 
-This validation covers the Run-first engineering workspace, catalog schema v8 standardized Run reports, class/RSA profile presentation, Pro Stock shift-report persistence/comparison, authoritative Tech Services timing/weather hydration, and the existing read-only Tech Services integration. No changes were made to the `nhratechservices` repository or server data.
+This validation covers the usability/progressive-disclosure pass on top of the v0.38 Run-first engineering workspace, catalog schema v8 standardized Run reports, class/RSA profile presentation, authoritative Tech Services timing/weather hydration, direct DDF/Holley/RacePak telemetry support, and the existing read-only Tech Services integration. No changes were made to the `nhratechservices` repository or server data.
 
 ## Results
 
-- **217/217 automated tests passed** (`PYTHONPATH=. pytest -q`).
+- **221/221 automated tests passed** (`PYTHONPATH=. pytest -q`).
 - `python -m compileall -q .` passed.
 - **3/3 bundled native import/plot pipelines passed**:
   - RacePak/DataLink `.rpk`
@@ -19,11 +19,26 @@ This validation covers the Run-first engineering workspace, catalog schema v8 st
   - nhratechservices `77eb280fe94825f93f2cdfdd3ab2568851aa6a19`
 - Release audit findings: **0 errors / 0 warnings**.
 
-## Run Workspace validation
+## Usability / progressive-disclosure validation
 
-Automated tests cover:
+Automated source-level regression checks cover:
 
-- canonical category → class profile resolution without filename inference;
+- permanent toolbar limited to Open / Save / Fit Run / active Run / X-axis / optional Compare;
+- Compare Reference controls hidden until Compare is enabled;
+- default Simple Workspace limited to Run Browser, Run Workspace and Channel Explorer rather than exposing every engineering dock;
+- Run Browser and Channel Explorer sharing one left-side tab group;
+- Channel Explorer defaulting to class-relevant **Essentials**, with **All channels** one selector away;
+- text search bypassing the Essentials filter so a search always spans the complete logger channel catalog;
+- standard class layout producing one core waveform rather than multiple automatic panels;
+- class-layout application remaining separate from standardized-report generation;
+- automatic default waveform selection preferring the authoritative class profile when available;
+- Run Workspace reduced to Summary / Data / Engineering while retaining provenance in tooltips/advanced detail.
+
+## Run Workspace / authority validation
+
+Automated tests continue to cover:
+
+- canonical category → class profile resolution without Run ownership inference from filenames;
 - Pro Stock standardized RSA seed visibility;
 - immutable/idempotent fingerprinted `run_reports` persistence;
 - report source-Asset validation;
@@ -44,4 +59,4 @@ Automated tests cover:
 
 ## Remaining external validation
 
-This build still requires a real Windows Qt/pyqtgraph smoke test for the new Run Workspace dock and its interactions. The automated environment validates Python/data behavior but does not prove Windows widget layout/painting.
+This build still requires a real Windows Qt/pyqtgraph smoke test for the simplified toolbar, dock/tab arrangement, Essentials channel browser, and compact Run Workspace. The automated environment validates Python/data behavior and static UI contracts but does not prove Windows widget layout/painting.

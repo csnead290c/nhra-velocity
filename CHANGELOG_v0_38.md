@@ -30,6 +30,19 @@
 - Run Assets now distinguish **Tech Services**, **Local working attachment**, and scratch/development authority plus remote/cached/managed-local state.
 - Direct **Open Log…** remains scratch-only; the new Run-first attachment action is the only local path that creates an explicit Run association.
 
+
+## Usability simplification / progressive disclosure (dev.6)
+
+- Simplified the permanent toolbar to the ordinary trackside path: Open, Save, Fit Run, active Run, X-axis mode, and optional Compare/Reference. Class-profile and Quick Graph controls remain available from menus/commands instead of occupying permanent width.
+- Compare Reference controls are hidden until Compare is enabled.
+- The default **Simple Workspace** now keeps the authoritative Run browser, Run Workspace and Channel Explorer available while hiding investigation/diagnostic tooling. Run Browser and Channel Explorer share one left-side tab group instead of consuming two panes.
+- Channel Explorer now defaults to **Essentials**: favorites plus the class-relevant standard channels for the active Run. **All channels** is one selector away, and entering a search always searches the complete logger channel catalog.
+- Applying a standard class layout now creates one useful core waveform (up to eight class-relevant channels) instead of automatically filling the worksheet with multiple waveform panels.
+- Applying a class layout no longer generates a Pro Stock report as a side effect; standardized reports remain an explicit Run Workspace action.
+- Automatic first-view channel selection prefers the authoritative Run class profile when available, while preserving existing user-customized waveform selections.
+- Collapsed the Run Workspace from five top-level tabs to three: **Summary**, **Data**, and **Engineering**. Report fingerprints/version/source details remain available as tooltips instead of crowding the everyday table.
+- Advanced class-layout/report actions moved under a single **More** menu in the Run Workspace.
+
 ## Run-first engineering workspace (dev.5)
 
 - Added a dedicated **Run Workspace** centered on the authoritative NHRA Tech Services Run rather than on a logger filename/session.

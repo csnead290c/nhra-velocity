@@ -1,6 +1,11 @@
 # NHRA Velocity Architecture — v0.38
 
 
+## Progressive-disclosure UI boundary
+
+NHRA Velocity should expose the smallest useful surface for ordinary Run review and reveal specialist tools only when requested. The default desktop path is authoritative Run selection → telemetry → core class channels → fit/compare. Advanced displays, RSA studies, report internals, evidence synchronization and diagnostic/audit tooling remain available but must not consume permanent screen space merely because they exist. Class profiles choose sensible defaults; they do not lock the user into a fixed layout.
+
+
 ## v0.37 display performance boundary
 
 The desktop may cache format-neutral X/Y display views, sorted interpolation views and cursor snap grids within a worksheet. Those caches are disposable and are cleared on session/Run mapping changes. They do not become evidence, alter raw samples, or change Tech Services authority. GUI readout updates are coalesced independently from the shared cursor signal so synchronized displays remain responsive without forcing full-rate table repainting.
