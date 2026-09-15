@@ -1,0 +1,29 @@
+{
+  "release": "0.38.0-dev.1",
+  "qualification_date": "2026-09-15",
+  "files": [
+    {
+      "filename": "DKCHI26Q3.rpk",
+      "sha256": "696272ac5ed149eb1dc2473cfa9cc892a780f07a6ee23a258b3a3f685f9e8325",
+      "family": "RacePak/DataLink",
+      "result": "PASS",
+      "purpose": "exact file reproducing screenshot import-dispatch failure; extension dispatch must remain RacePak and never enter MoTeC"
+    },
+    {
+      "filename": "Hartford Q3.DLZ",
+      "sha256": "4701f9b7b4bb0a3e755b5e5017293432c29d1180a63467af420839932c010863",
+      "family": "Holley EFI V6 DLZ",
+      "result": "PASS",
+      "rows": 4754,
+      "sample_rate_hz": 38.4615384615,
+      "engine_rpm_min": 563.5735,
+      "engine_rpm_max": 10853.0303,
+      "paired_reference": "V5Veg041225Q3_Hartford.rpk",
+      "paired_reference_sha256": "9aebd32c80e2da625fc46c67df4df497f0b7b36cb8e7e16792cbcf27a10f9a65",
+      "paired_engine_rpm_time_offset_s": 8.846,
+      "paired_engine_rpm_correlation": 0.99948743,
+      "paired_engine_rpm_rmse_rpm": 33.46,
+      "notes": "Holley logger time/RPM independently cross-checked against the paired RacePak recording from the same Matt Hartford Pro Stock Q3 run. Only V6 RTC + engine RPM semantics are promoted as qualified; unknown parameter slots remain numeric and V5/V3 fail closed."
+    }
+  ]
+}

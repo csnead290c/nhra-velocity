@@ -58,8 +58,8 @@ FORMAT_SPECS: tuple[ImportFormatSpec, ...] = (
         "aim", "AiM RaceStudio", (".xrk", ".xrz", ".drk"), "bridge", "AiM", True,
         "AiM RaceStudio native files are recognized. The intended Windows path is the official AiM data-access DLL behind an isolated adapter; no vendor binary is bundled here."
     ),
-    ImportFormatSpec("holley", "Holley EFI", (".dl", ".dlz"), "pending", "Holley", True,
-        "Holley DL/DLZ is recognized. NHRA Tech Data has identified a multi-generation NHRA qualification corpus (including Pro Stock), but native decoding is not yet qualified in this build."),
+    ImportFormatSpec("holley", "Holley EFI V6", (".dl", ".dlz"), "direct", "Holley", True,
+        "Native Holley V6 DL/DLZ import is qualified against paired NHRA Pro Stock Holley/RacePak data. V5 sparse and V3/other families remain fail-closed."),
     ImportFormatSpec("bigstuff_tune", "BigStuff / BigComm calibration", (".bigtune", ".big"), "pending", "BigStuff", True,
         "BigStuff .bigTune/.big files are recognized as calibration/support files, not assumed to be telemetry logs. A native BigStuff data-log format must be identified and qualified separately."),
     ImportFormatSpec("hptuners", "HP Tuners VCM Scanner", (".hpl",), "pending", "HP Tuners", True, "HP Tuners HPL is recognized, but a version-qualified VCM Scanner decoder is not yet available."),

@@ -24,7 +24,7 @@ These families are intentionally visible to folder import and the file picker so
 | FuelTech Vision / PowerFT | `.ftlog`, `.ftml` | Recognized and rejected with a specific message until native decoding is validated. CSV and MoTeC `.ld` exports are supported. |
 | ASAM MDF | `.mf4`, `.mdf` | Recognized. High-priority standard decoder target; should preserve mixed-rate channels, conversion metadata and events. |
 | AiM RaceStudio | `.xrk`, `.xrz`, `.drk` | Recognized. Preferred Windows path is the official AiM data-access DLL behind an isolated adapter. |
-| Holley EFI | `.dl`, `.dlz` | Recognized. Native decoder not yet qualified. |
+| Holley EFI V6 | `.dl`, `.dlz` | Direct native import. V6 RTC + engine RPM qualified against paired NHRA Pro Stock Holley/RacePak data; unqualified slots remain numeric. V5 sparse/V3 fail closed. |
 | HP Tuners VCM Scanner | `.hpl` | Recognized. Native decoder not yet qualified. |
 | Racelogic VBOX | `.vbb` | Recognized. Newer binary VBOX decoder not yet qualified; text `.vbo` is direct. |
 | AEM | `.daq`, `.itlog` | Recognized. AQ-1 / Infinity native decoders not yet qualified. |

@@ -107,3 +107,49 @@ def test_fit_window_uses_official_or_detected_run_not_entire_log():
     assert win.x_max == pytest.approx(7.30)
     d=fit_window(run,'Distance from Launch',finish_distance_ft=1000)
     assert d.x_min == -25 and d.x_max == 1050
+
+
+def test_pressure_role_mapping_does_not_cross_assign_same_unit():
+    from runlab.importers import auto_map_channels
+    cols = ['Oil Pressure', 'Brake PSI', 'Fuel Rail Pressure', 'Boost Pressure']
+    units = {c: 'psi' for c in cols}
+    mapped = auto_map_channels(cols, units)
+    assert mapped['oil_pressure_psi'] == 'Oil Pressure'
+    assert mapped['brake_pressure_psi'] == 'Brake PSI'
+    assert mapped['fuel_pressure_psi'] == 'Fuel Rail Pressure'
+    assert mapped['boost_psi'] == 'Boost Pressure'
+
+
+def _write_holley_v6_dl(path: Path, rows: int = 20):
+    import struct
+    from runlab.holley import HOLLEY_MAGIC_V5_V6, HOLLEY_V6_DATA_START, HOLLEY_V6_FLOATS_PER_ROW
+    header = bytearray(HOLLEY_V6_DATA_START)
+    struct.pack_into('<I', header, 0, HOLLEY_MAGIC_V5_V6)
+    struct.pack_into('<I', header, 8, 6)
+    body = bytearray()
+    base_tick = 987654321000
+    for i in range(rows):
+        words = np.zeros(HOLLEY_V6_FLOATS_PER_ROW, dtype='<u4')
+        # Every semantic slot is stored at an even float/word position.
+        values = words.view('<f4')
+        values[4] = 6000.0 + i * 100.0  # parameter 2 = RPM
+        values[6] = 2.5                 # parameter 3 = injector PW
+        tick = base_tick + i * 25
+        words[2] = np.uint32(tick & 0xffffffff)
+        words[3] = np.uint32((tick >> 32) & 0xffffffff)
+        body.extend(words.tobytes())
+    path.write_bytes(bytes(header) + bytes(body))
+
+
+def test_holley_v6_direct_registry_and_decode(tmp_path):
+    p = tmp_path / 'ProStock_Q3.dl'
+    _write_holley_v6_dl(p)
+    spec = spec_for_path(p)
+    assert spec is not None and spec.key == 'holley' and spec.status == 'direct'
+    run = load_telemetry(p)
+    assert run.vendor == 'Holley'
+    assert run.metadata['import_decoder'] == 'Holley'
+    assert run.channel_map['engine_rpm'] == 'Engine RPM'
+    assert len(run.data) == 20
+    assert run.data['Time (s)'].iloc[-1] == pytest.approx(0.475)
+    assert run.data['Engine RPM'].iloc[-1] == pytest.approx(7900.0)

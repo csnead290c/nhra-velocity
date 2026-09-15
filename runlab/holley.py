@@ -28,7 +28,7 @@ HOLLEY_V5_VERSION = 5
 HOLLEY_V6_DATA_START = 16_456
 HOLLEY_V6_FLOATS_PER_ROW = 1_030
 HOLLEY_V6_BYTES_PER_ROW = HOLLEY_V6_FLOATS_PER_ROW * 4
-HOLLEY_V6_PARAMETER_SLOTS = 516
+HOLLEY_V6_PARAMETER_SLOTS = 515
 
 
 class HolleyDecodeError(ValueError):
@@ -164,7 +164,7 @@ def parse_holley(path: str | Path) -> TelemetryRun:
     time_s = (ticks - ticks[0]).astype(np.float64) / 1000.0
 
     known_names: Dict[int, str] = {
-        0: "Holley Point Number",
+        0: "Holley Param 000",
         2: "Engine RPM",
         # These early fields follow the standard Holley V6 parameter ordering
         # and are retained as source labels. Only Engine RPM/time are promoted
@@ -210,6 +210,7 @@ def parse_holley(path: str | Path) -> TelemetryRun:
         "holley_data_start": HOLLEY_V6_DATA_START,
         "holley_floats_per_row": HOLLEY_V6_FLOATS_PER_ROW,
         "holley_parameter_slots": HOLLEY_V6_PARAMETER_SLOTS,
+        "holley_native_qualification": "paired NHRA Pro Stock V6 DLZ / RacePak",
         "holley_parameter_index": parameter_index,
         "holley_rtc_first_tick": first_tick,
         "holley_rtc_last_tick": last_tick,

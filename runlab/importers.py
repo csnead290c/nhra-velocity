@@ -165,6 +165,22 @@ def auto_map_channels(
                 if tokens & {"after", "launch", "shift", "runtime", "timer", "ign", "on"}:
                     score -= 70
 
+            # Pressure channels are especially dangerous to cross-map because
+            # psi is shared by unrelated systems. Require role words, not merely
+            # a generic pressure/unit coincidence.
+            pressure_roles = {
+                "oil_pressure_psi": {"oil"},
+                "fuel_pressure_psi": {"fuel", "rail"},
+                "brake_pressure_psi": {"brake"},
+                "boost_psi": {"boost", "map", "manifold"},
+            }
+            if canonical in pressure_roles and not (tokens & pressure_roles[canonical]):
+                score -= 85
+            if canonical in pressure_roles:
+                foreign = {"oil", "fuel", "rail", "brake", "boost", "map", "manifold"} - pressure_roles[canonical]
+                if tokens & foreign:
+                    score -= 65
+
             # Measurement channels should not silently map to state/limit/target
             # values when a real engineering signal is present.
             if canonical in measurement_canonicals and tokens & state_words:
@@ -981,6 +997,9 @@ def load_telemetry(
         elif key == "motec":
             from .motec_ld import parse_motec_ld
             run = parse_motec_ld(path)
+        elif key == "holley":
+            from .holley import parse_holley
+            run = parse_holley(path)
         elif key in {"vbox", "vbox vbo", "racelogic vbox"}:
             run = parse_vbox_vbo(path)
         elif key in {"tunerstudio", "efi analytics", "megasquirt"}:
