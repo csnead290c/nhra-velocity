@@ -916,6 +916,8 @@ def detect_vendor(path: str | Path) -> str:
         return "MaxxECU"
     if ext == ".ld" or name.endswith('.ld.bin') or "motec" in name or "i2" in name:
         return "MoTeC"
+    if ext == ".ddf":
+        return "RacePak DDF"
     if "racepak" in name or ext == ".rpk" or '.rpk.' in name:
         return "RacePak"
     if "fueltech" in name or ext in {".ftml", ".ftlog"}:
@@ -994,6 +996,9 @@ def load_telemetry(
         elif key == "racepak":
             from .racepak import parse_racepak_rpk
             run = parse_racepak_rpk(path)
+        elif key in {"racepak ddf", "racepak_ddf", "ddf"}:
+            from .racepak_ddf import parse_racepak_ddf
+            run = parse_racepak_ddf(path)
         elif key == "motec":
             from .motec_ld import parse_motec_ld
             run = parse_motec_ld(path)

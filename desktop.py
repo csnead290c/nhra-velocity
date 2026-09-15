@@ -4575,7 +4575,8 @@ class MainWindow(QtWidgets.QMainWindow):
         text=(
             'NHRA Velocity import status\n\n'
             'Native / direct:\n'
-            '  • RacePak/DataLink .rpk — validated legacy family; real Pro Stock and Top Fuel demo files exercised in development.\n'
+            '  • RacePak/DataLink .rpk — validated legacy/current DataLink run families.\n'
+            '  • RacePak raw .ddf — direct SD-card/logger decode; matching .rcg/prior .rpk config adds names and units but is not required for raw samples.\n'
             '  • MoTeC .ld — native parser for currently validated LD/M1 families; additional real-log qualification remains in progress.\n'
             '  • MaxxECU .maxxlog / .MaxxECU-log — native text log; supported zip packages are also decoded.\n\n'
             'Delimited:\n'
@@ -4625,7 +4626,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.statusBar().showMessage(f'Opened {opened} log(s) — {Path(h.path).name} — {len(report.default_channels)} default trace(s) selected',8000)
 
     def open_logs(self):
-        files,_=QtWidgets.QFileDialog.getOpenFileNames(self,'Open telemetry logs','', 'Supported telemetry (*.ld *.rpk *.csv *.tsv *.txt *.log *.maxxlog *.MaxxECU-log *.ftlog *.ftml *.zip *.bin *.vbo *.msl *.mlg *.xlsx *.xlsm *.dl *.dlz *.bigTune *.big);;MoTeC (*.ld);;RacePak (*.rpk *.bin);;MaxxECU (*.maxxlog *.MaxxECU-log *.zip);;FuelTech (*.ftlog *.ftml *.csv *.ld);;Delimited exports (*.csv *.tsv *.txt *.log);;All files (*.*)')
+        files,_=QtWidgets.QFileDialog.getOpenFileNames(self,'Open telemetry logs','', 'Supported telemetry (*.ld *.rpk *.ddf *.csv *.tsv *.txt *.log *.maxxlog *.MaxxECU-log *.ftlog *.ftml *.zip *.bin *.vbo *.msl *.mlg *.xlsx *.xlsm *.dl *.dlz *.bigTune *.big);;MoTeC (*.ld);;RacePak (*.rpk *.ddf *.bin);;MaxxECU (*.maxxlog *.MaxxECU-log *.zip);;FuelTech (*.ftlog *.ftml *.csv *.ld);;Delimited exports (*.csv *.tsv *.txt *.log);;All files (*.*)')
         self._open_paths(files)
 
     def _open_bundled_demos(self):

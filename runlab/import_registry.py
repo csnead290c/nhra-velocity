@@ -37,6 +37,8 @@ class ImportFormatSpec:
 
 FORMAT_SPECS: tuple[ImportFormatSpec, ...] = (
     ImportFormatSpec("racepak", "RacePak / DataLink", (".rpk", ".rpk.bin"), "direct", "RacePak", True),
+    ImportFormatSpec("racepak_ddf", "RacePak raw logger DDF", (".ddf",), "direct", "RacePak DDF", True,
+        "Raw RacePak DDF decoding is supported directly. A matching RCG/RPK configuration is optional for channel names/units; without one, stable channel-id labels are used and canonical roles are not guessed."),
     ImportFormatSpec("motec", "MoTeC i2 / M1", (".ld", ".ld.bin"), "direct", "MoTeC", True),
     ImportFormatSpec("maxxecu", "MaxxECU", (".maxxecu-log", ".maxxlog", ".maxxecu-zip-log"), "direct", "MaxxECU"),
     ImportFormatSpec("vbox_vbo", "Racelogic VBOX VBO", (".vbo",), "interchange", "VBOX"),

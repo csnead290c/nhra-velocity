@@ -33,3 +33,11 @@ A decoder is not considered broadly production-qualified merely because a genera
 ## Raw-data rule
 
 Qualification samples are read-only. Decoder tests must never modify source logger files. Hash-identical copies need only be decoded once for format behavior, though separate test cases may still be useful for cache/provenance tests.
+## RacePak raw DDF qualification — v0.38
+
+Raw RacePak `.DDF` support was qualified read-only against a same-recording NHRA PRO III DDF/RPK pair. The DDF descriptor table matched all 83 `_CONNECT4_COMMAND` identifiers embedded in the DataLink RPK configuration; 68 descriptors were marked as recorded and the DDF payload contained exactly 410 one-second frames at their native aggregate rate.
+
+The decoded DDF channels were compared against the first 410 seconds of DataLink's RPK engineering values. All 68 recorded channels matched. The worst normalized RMS error was below `2.8e-7`, and the largest absolute difference was below `3.7e-5` engineering units (float32 reconstruction noise). This validates the qualified DDF rules used by `runlab.racepak_ddf`: signed int16 fixed-point samples, one-second channel blocks in descriptor order, and descriptor flags `00/FF/FE/FD/FC` corresponding to decimal exponents `0/1/2/3/4`.
+
+A separate V300SD DDF + RCG sample was also structurally decoded and bound by `_CONNECT4_COMMAND` without channel-id or sample-rate mismatches. The raw corpus remains external/read-only and is not included in the repository.
+

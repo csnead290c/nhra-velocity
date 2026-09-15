@@ -1,10 +1,11 @@
 # Telemetry import support
 
-## Qualified/direct paths in v0.37
+## Qualified/direct paths in v0.38
 
 | Source | Input | Status | Notes |
 | --- | --- | --- | --- |
 | RacePak / DataLink | `.rpk` | Direct | Supports the legacy `ScaledBuffer` serialization and the current `CAN_Device` family. Exercised against real NHRA files from 2019 and 2026; current files validated native timers, used-sample counts, explicit units and hardware/sensor linear calibration. |
+| RacePak raw logger | `.ddf` | Direct | Decodes the SD-card/logger recording directly, without DataLink conversion. The qualified families use a descriptor table plus one-second fixed-point sample frames. A matching `.rcg` or prior `.rpk` config is optional for names/units; without one NHRA Velocity preserves stable channel IDs and does not guess semantics. |
 | RacePak / downloaded wrapper | `.rpk.bin` and similarly identifiable names | Direct | Content/filename probe routes to the RacePak decoder instead of text parsing. |
 | MoTeC i2 / M1 | `.ld` | Direct | Walks the channel metadata linked list as the authority, preserves native channel timebases and can skip isolated unsupported diagnostic/state encodings without discarding the run. Exercised against a real 2026 PSM M1 log with 180 decodable native channels. |
 | MaxxECU | `.MaxxECU-log`, `.maxxlog` | Direct | Vendor-native format is delimited text. |
@@ -19,7 +20,7 @@
 
 These families are intentionally visible to folder import and the file picker so the application can identify them and give a useful decoder/bridge message instead of either ignoring the file or guessing that it is CSV.
 
-| Source | Input | v0.37 behavior / planned path |
+| Source | Input | v0.38 behavior / planned path |
 | --- | --- | --- |
 | FuelTech Vision / PowerFT | `.ftlog`, `.ftml` | Recognized and rejected with a specific message until native decoding is validated. CSV and MoTeC `.ld` exports are supported. |
 | ASAM MDF | `.mf4`, `.mdf` | Recognized. High-priority standard decoder target; should preserve mixed-rate channels, conversion metadata and events. |
