@@ -104,10 +104,11 @@ from runlab.model_enrichment import run_rsa_model_enrichment, rebuild_rsa_model_
 from runlab.run_profiles import RUN_PROFILES, profile as run_profile, infer_profile, set_run_profile, resolve_profile_channels, apply_profile_rsa_defaults
 from runlab.run_window import fit_window as drag_fit_window
 from runlab.shift_report import attach_shift_report, build_shift_report, compare_shift_reports
+from runlab.run_workspace import build_run_workspace
 
 
 APP_ORG = "NHRA"
-APP_ID = "NHRA.TechData"
+APP_ID = "NHRA.Velocity"
 PROJECT_EXT = ".nhratech"
 
 # Drag-racing oriented Quick Graphs.  These are canonical-role requests rather
@@ -727,7 +728,7 @@ class CatalogRunDetails(QtWidgets.QWidget):
         g=self._group('Run Identity')
         for label,key in [('Run key','run_key'),('Driver','driver_name'),('Category','category'),('Car number','car_number'),('Round / session','round'),('Lane','lane'),('Date / time','run_datetime'),('Sync state','sync_state')]:self._row(g,label,run.get(key),'catalog')
         g=self._group('Official Timing')
-        labels={'reaction_time_s':'RT','sixty_ft_s':'60 ft','three_thirty_ft_s':'330 ft','eighth_mile_s':'660 ft','eighth_mile_mph':'660 MPH','thousand_ft_s':'1000 ft','quarter_mile_s':'ET','quarter_mile_mph':'MPH','correction_factor':'CF'}
+        labels={'reaction_time_s':'RT','sixty_ft_s':'60 ft','three_thirty_ft_s':'330 ft','eighth_mile_s':'660 ft','eighth_mile_mph':'660 MPH','thousand_ft_s':'1000 ft','thousand_ft_mph':'1000 MPH','quarter_mile_s':'ET','quarter_mile_mph':'MPH','correction_factor':'CF'}
         for key,label in labels.items():self._row(g,label,(run.get('timing') or {}).get(key),run.get('timing_provenance',''))
         if run.get('weather'):
             g=self._group('Weather / Conditions')
@@ -736,6 +737,136 @@ class CatalogRunDetails(QtWidgets.QWidget):
             g=self._group('Source / Provenance')
             for key,value in run['source'].items():self._row(g,key,value,'evidence')
         self.tree.expandAll()
+
+
+class RunWorkspacePanel(QtWidgets.QWidget):
+    """Run-first engineering workspace around one authoritative NHRA Run.
+
+    This panel intentionally shows canonical timing/weather beside local evidence
+    and derived engineering products.  It never changes Run ownership or infers a
+    Run from a filename.
+    """
+    openRunRequested = QtCore.Signal(str)
+    attachTelemetryRequested = QtCore.Signal(str)
+    applyProfileRequested = QtCore.Signal(str, str)
+    generateReportRequested = QtCore.Signal(str, str)
+
+    def __init__(self,catalog:LocalCatalog,parent=None):
+        super().__init__(parent);self.catalog=catalog;self.run_id='';self.state=None
+        lay=QtWidgets.QVBoxLayout(self);lay.setContentsMargins(4,4,4,4)
+        self.title=QtWidgets.QLabel('Select an authoritative Run');font=self.title.font();font.setBold(True);font.setPointSize(font.pointSize()+1);self.title.setFont(font);self.title.setWordWrap(True);lay.addWidget(self.title)
+        self.subtitle=QtWidgets.QLabel('Official timing/weather, telemetry evidence, class defaults and derived reports stay attached to the Run.');self.subtitle.setWordWrap(True);self.subtitle.setStyleSheet('color:#aeb4bb');lay.addWidget(self.subtitle)
+        row=QtWidgets.QHBoxLayout();self.open_btn=QtWidgets.QPushButton('Open Telemetry');self.attach_btn=QtWidgets.QPushButton('Attach Telemetry…');self.profile_btn=QtWidgets.QPushButton('Apply Class Layout');self.report_btn=QtWidgets.QPushButton('Generate Report');self.refresh_btn=QtWidgets.QPushButton('Refresh')
+        for b in (self.open_btn,self.attach_btn,self.profile_btn,self.report_btn):row.addWidget(b)
+        row.addStretch(1);row.addWidget(self.refresh_btn);lay.addLayout(row)
+        self.tabs=QtWidgets.QTabWidget();lay.addWidget(self.tabs,1)
+        self.overview=QtWidgets.QTreeWidget();self.overview.setHeaderLabels(['Field','Value','Unit / Source']);self.overview.setAlternatingRowColors(True);self.overview.header().setSectionResizeMode(0,QtWidgets.QHeaderView.ResizeToContents);self.overview.header().setSectionResizeMode(1,QtWidgets.QHeaderView.Stretch);self.overview.header().setSectionResizeMode(2,QtWidgets.QHeaderView.ResizeToContents);self.tabs.addTab(self.overview,'Overview')
+        self.assets=QtWidgets.QTableWidget(0,6);self.assets.setHorizontalHeaderLabels(['Type','File','Vendor','Authority','Cache','Time mapping']);self.assets.verticalHeader().setVisible(False);self.assets.horizontalHeader().setSectionResizeMode(1,QtWidgets.QHeaderView.Stretch);self.tabs.addTab(self.assets,'Evidence')
+        self.engineering=QtWidgets.QTreeWidget();self.engineering.setHeaderLabels(['Input / Result','Value','Unit','Provenance']);self.engineering.setAlternatingRowColors(True);self.engineering.header().setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch);self.tabs.addTab(self.engineering,'Engineering / RSA')
+        self.reports=QtWidgets.QTableWidget(0,7);self.reports.setHorizontalHeaderLabels(['Report','Profile','Version','Generated','Source asset','Fingerprint','Vs previous']);self.reports.verticalHeader().setVisible(False);self.reports.horizontalHeader().setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch);self.tabs.addTab(self.reports,'Reports')
+        self.models=QtWidgets.QTableWidget(0,5);self.models.setHorizontalHeaderLabels(['Model snapshot','Type','Version','Created','Quality']);self.models.verticalHeader().setVisible(False);self.models.horizontalHeader().setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch);self.tabs.addTab(self.models,'Models')
+        self.open_btn.clicked.connect(lambda:self.openRunRequested.emit(self.run_id) if self.run_id else None);self.attach_btn.clicked.connect(lambda:self.attachTelemetryRequested.emit(self.run_id) if self.run_id else None);self.profile_btn.clicked.connect(self._apply_profile);self.report_btn.clicked.connect(self._generate_report);self.refresh_btn.clicked.connect(self.refresh)
+        self._enable_actions(False)
+
+    def _enable_actions(self,enabled:bool):
+        for b in (self.open_btn,self.attach_btn,self.profile_btn,self.report_btn):b.setEnabled(bool(enabled))
+
+    def set_run(self,run_id:str):
+        self.run_id=str(run_id or '');self.refresh()
+
+    def _group(self,label):
+        item=QtWidgets.QTreeWidgetItem([label,'','']);f=item.font(0);f.setBold(True);item.setFont(0,f);self.overview.addTopLevelItem(item);return item
+
+    def _ov(self,parent,label,value,tail=''):
+        if value in (None,'',{}):return
+        if isinstance(value,float):value=f'{value:.4f}'.rstrip('0').rstrip('.')
+        parent.addChild(QtWidgets.QTreeWidgetItem([str(label),str(value),str(tail)]))
+
+    @staticmethod
+    def _value_text(value):
+        if isinstance(value,float):return f'{value:.6g}'
+        if isinstance(value,(list,tuple,dict)):return json.dumps(value,separators=(',',':'),default=str)
+        return str(value if value is not None else '')
+
+    def _apply_profile(self):
+        if self.run_id and self.state:self.applyProfileRequested.emit(self.run_id,self.state.profile_key)
+
+    def _generate_report(self):
+        if not self.run_id or not self.state:return
+        expected=list(self.state.expected_reports)
+        if not expected:
+            QtWidgets.QMessageBox.information(self,'Run Report',f'No standardized report is defined yet for {self.state.profile_label}.');return
+        missing=list(self.state.missing_expected_reports);choices=missing or expected
+        report=choices[0]
+        if len(choices)>1:
+            report,ok=QtWidgets.QInputDialog.getItem(self,'Run Report','Report type:',choices,0,False)
+            if not ok:return
+        self.generateReportRequested.emit(self.run_id,str(report))
+
+    def refresh(self):
+        self.overview.clear();self.assets.setRowCount(0);self.engineering.clear();self.reports.setRowCount(0);self.models.setRowCount(0);self.state=None
+        if not self.run_id:
+            self.title.setText('Select an authoritative Run');self._enable_actions(False);return
+        try:self.state=build_run_workspace(self.catalog,self.run_id)
+        except Exception as exc:
+            self.title.setText(f'Run workspace unavailable — {exc}');self._enable_actions(False);return
+        st=self.state;r=st.run;self._enable_actions(True)
+        identity=' · '.join(x for x in (str(r.get('driver_name') or ''),str(r.get('category') or ''),str(r.get('round') or '')) if x)
+        self.title.setText(f"{r.get('event_name') or 'Run'} — {identity or r.get('run_key') or self.run_id}")
+        report_status='reports complete' if not st.missing_expected_reports else ('report pending: '+', '.join(st.missing_expected_reports))
+        self.subtitle.setText(f"{st.profile_label} profile · {st.finish_distance_ft} ft finish · {len(st.telemetry_assets)} telemetry asset(s) · {report_status}")
+        g=self._group('Identity / Authority')
+        for label,key in [('Run key','run_key'),('Driver','driver_name'),('Category','category'),('Car number','car_number'),('Round','round'),('Lane','lane'),('Date / time','run_datetime'),('Sync state','sync_state')]:self._ov(g,label,r.get(key),'Tech Services' if r.get('sync_state')=='synced' else 'catalog')
+        g=self._group('Official Timing')
+        for rec in st.timing:self._ov(g,rec.label,rec.value,f'{rec.unit} · {rec.provenance}'.strip(' ·'))
+        g=self._group('Weather / Conditions')
+        for rec in st.weather:self._ov(g,rec.label,rec.value,f'{rec.unit} · {rec.provenance}'.strip(' ·'))
+        self.overview.expandAll()
+
+        self.assets.setRowCount(len(st.assets))
+        for row,a in enumerate(st.assets):
+            meta=a.get('metadata') or {};mapping=self.catalog.get_time_mapping(str(a['id'])) or {}
+            authority='Tech Services' if a.get('source_kind')=='tech_services' else ('Local Run attachment' if meta.get('attachment_mode')=='local_working_copy' else str(a.get('source_kind') or 'local'))
+            cached='verified managed' if a.get('storage_mode')=='managed' and self.catalog.asset_cache_valid(str(a['id'])) else ('local' if a.get('local_path') else 'remote')
+            tm='' if not mapping else f"run = {float(mapping.get('scale') or 1):.7g}×asset {float(mapping.get('offset_s') or 0):+.4f}s"
+            for col,val in enumerate((a.get('asset_type',''),a.get('filename',''),a.get('vendor',''),authority,cached,tm)):self.assets.setItem(row,col,QtWidgets.QTableWidgetItem(str(val or '')))
+
+        current=self.engineering.invisibleRootItem()
+        measured=QtWidgets.QTreeWidgetItem(['Run engineering values','','','']);f=measured.font(0);f.setBold(True);measured.setFont(0,f);current.addChild(measured)
+        for rec in st.engineering:
+            measured.addChild(QtWidgets.QTreeWidgetItem([str(rec.get('key') or ''),self._value_text(rec.get('value')),str(rec.get('unit') or ''),str(rec.get('provenance') or '')]))
+        defaults=QtWidgets.QTreeWidgetItem([f'{st.profile_label} standardized RSA seeds','','','class profile defaults']);f=defaults.font(0);f.setBold(True);defaults.setFont(0,f);current.addChild(defaults)
+        for rec in st.profile_defaults:defaults.addChild(QtWidgets.QTreeWidgetItem([rec.label,self._value_text(rec.value),rec.unit,rec.provenance]))
+        self.engineering.expandAll()
+
+        self.reports.setRowCount(len(st.reports))
+        first_by_type={}
+        for rec in st.reports:first_by_type.setdefault(str(rec.get('report_type') or ''),rec)
+        for row,rec in enumerate(st.reports):
+            rtype=str(rec.get('report_type') or '')
+            comp=st.report_comparisons.get(rtype) if first_by_type.get(rtype) is rec else None
+            status='—'
+            tooltip=''
+            if comp is not None:
+                alerts=int(comp.get('alerts') or 0);status=f'CHECK {alerts}' if alerts else 'stable'
+                prev=' · '.join(x for x in (str(comp.get('previous_event_name') or ''),str(comp.get('previous_run_key') or ''),str(comp.get('previous_run_datetime') or '')) if x)
+                detail=[]
+                for rr in comp.get('rows') or []:
+                    dr=rr.get('delta_rpm');dt=rr.get('delta_time_s')
+                    if dr is not None or dt is not None:detail.append(f"Shift {rr.get('shift')}: ΔRPM={'' if dr is None else f'{float(dr):+.0f}'}, Δt={'' if dt is None else f'{float(dt):+.4f}s'}")
+                tooltip=('Previous: '+prev+'\n' if prev else '')+'\n'.join(detail)
+            vals=(rtype,rec.get('profile',''),rec.get('report_version',''),rec.get('generated_at') or rec.get('created_at',''),rec.get('source_asset_id') or '',str(rec.get('fingerprint_sha256') or '')[:12],status)
+            for col,val in enumerate(vals):
+                item=QtWidgets.QTableWidgetItem(str(val or ''))
+                if tooltip:item.setToolTip(tooltip)
+                if col==6 and str(val).startswith('CHECK'):item.setForeground(QtGui.QColor('#ffb454'))
+                self.reports.setItem(row,col,item)
+
+        self.models.setRowCount(len(st.model_snapshots))
+        for row,rec in enumerate(st.model_snapshots):
+            q=rec.get('quality') or {};qtext=', '.join(f'{k}={v}' for k,v in list(q.items())[:3])
+            vals=(rec.get('name',''),rec.get('model_type',''),rec.get('model_version',''),rec.get('created_at',''),qtext)
+            for col,val in enumerate(vals):self.models.setItem(row,col,QtWidgets.QTableWidgetItem(str(val or '')))
 
 
 class AssetBrowser(QtWidgets.QWidget):
@@ -3320,7 +3451,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.case_review=SynchronizedReviewPanel(self.catalog);self.case_browser.caseSelectionChanged.connect(self.case_review.set_case);self.case_review.caseTimeChanged.connect(self._case_review_time_changed);self.case_review.cacheAssetRequested.connect(self._keep_asset_offline)
         d=QtWidgets.QDockWidget('Synchronized Case Review',self);d.setObjectName('CaseReviewDock');d.setWidget(self.case_review);self.addDockWidget(QtCore.Qt.BottomDockWidgetArea,d);self.tabifyDockWidget(asset_dock,d);asset_dock.raise_()
         self.catalog_run_details=CatalogRunDetails(self.catalog);self.run_browser.runSelectionChanged.connect(self.catalog_run_details.set_run)
-        d=QtWidgets.QDockWidget('Canonical Run Record',self);d.setObjectName('CatalogRunDetailsDock');d.setWidget(self.catalog_run_details);self.addDockWidget(QtCore.Qt.RightDockWidgetArea,d)
+        d=QtWidgets.QDockWidget('Canonical Run Record',self);d.setObjectName('CatalogRunDetailsDock');d.setWidget(self.catalog_run_details);self.addDockWidget(QtCore.Qt.RightDockWidgetArea,d);canonical_dock=d
+        self.run_workspace=RunWorkspacePanel(self.catalog);self.run_browser.runSelectionChanged.connect(self.run_workspace.set_run);self.run_workspace.openRunRequested.connect(self._open_catalog_run);self.run_workspace.attachTelemetryRequested.connect(self._attach_local_telemetry_to_run);self.run_workspace.applyProfileRequested.connect(self._apply_profile_to_catalog_run);self.run_workspace.generateReportRequested.connect(self._generate_standard_run_report)
+        d=QtWidgets.QDockWidget('Run Workspace',self);d.setObjectName('RunWorkspaceDock');d.setWidget(self.run_workspace);self.addDockWidget(QtCore.Qt.RightDockWidgetArea,d);self.tabifyDockWidget(canonical_dock,d);d.raise_()
         # Sessions / compare sets
         self.session_tree=SessionDock(self.store); self.session_tree.activeRequested.connect(self.store.set_active); self.session_tree.roleChanged.connect(self._role_changed); self.session_tree.alignmentChanged.connect(self._alignment_changed); self.session_tree.autoAlignRequested.connect(self._auto_align_session); self.session_tree.renameRequested.connect(self._rename_session); self.session_tree.removeRequested.connect(self._remove_session)
         d=QtWidgets.QDockWidget('Sessions / Compare Sets',self); d.setObjectName('SessionsDock'); d.setWidget(self.session_tree); self.addDockWidget(QtCore.Qt.LeftDockWidgetArea,d)
@@ -3718,6 +3851,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if p.key=='pro_stock':
             try:
                 report=attach_shift_report(h.run,profile='pro_stock')
+                if h.catalog_run_id:
+                    self.catalog.save_run_report(h.catalog_run_id,report,source_asset_id=h.catalog_asset_id or None,label='Pro Stock Shift Report')
+                    if hasattr(self,'run_workspace'):self.run_workspace.set_run(h.catalog_run_id)
                 report_note=f"; shift report {len(report.get('events',[]))} event(s)"
             except Exception as exc:
                 report_note=f'; shift report pending ({exc})'
@@ -3733,6 +3869,9 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self,'Pro Stock Shift Report','Open a telemetry Run first.');return
         try:
             report=attach_shift_report(h.run,profile='pro_stock')
+            if h.catalog_run_id:
+                self.catalog.save_run_report(h.catalog_run_id,report,source_asset_id=h.catalog_asset_id or None,label='Pro Stock Shift Report')
+                if hasattr(self,'run_workspace'):self.run_workspace.set_run(h.catalog_run_id)
         except Exception as exc:
             QtWidgets.QMessageBox.warning(self,'Pro Stock Shift Report',str(exc));return
         reference=next((x for x in self.store.runs if x.role=='reference' and x is not h),None)
@@ -4440,6 +4579,7 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
         self.run_browser.refresh();self.asset_browser.set_run(run_id);self.catalog_run_details.set_run(run_id)
+        if hasattr(self,'run_workspace'):self.run_workspace.set_run(run_id)
         if opened or existing_count:
             timing=record.get('timing') or {}
             inherited=[]
@@ -4450,6 +4590,44 @@ class MainWindow(QtWidgets.QMainWindow):
         if errors:
             QtWidgets.QMessageBox.warning(self,'Attach Local Telemetry','Some files could not be attached:\n\n'+'\n'.join(errors))
 
+    def _active_handle_for_catalog_run(self, run_id: str) -> Optional[RunHandle]:
+        rid=str(run_id or '')
+        active=self.store.active
+        if active is not None and str(active.catalog_run_id or '')==rid:
+            return active
+        return next((h for h in self.store.runs if str(h.catalog_run_id or '')==rid),None)
+
+    def _apply_profile_to_catalog_run(self, run_id: str, profile_key: str):
+        h=self._active_handle_for_catalog_run(run_id)
+        if h is None:
+            self._open_catalog_run(run_id);h=self._active_handle_for_catalog_run(run_id)
+        if h is None:
+            QtWidgets.QMessageBox.information(self,'Run Workspace','Attach or open telemetry for this Run before applying a waveform layout.');return
+        try:self.store.set_active(self.store.runs.index(h))
+        except Exception:pass
+        self._apply_standard_profile_layout(profile_key)
+        if hasattr(self,'run_workspace'):self.run_workspace.set_run(run_id)
+
+    def _generate_standard_run_report(self, run_id: str, report_type: str):
+        h=self._active_handle_for_catalog_run(run_id)
+        if h is None:
+            self._open_catalog_run(run_id);h=self._active_handle_for_catalog_run(run_id)
+        if h is None:
+            QtWidgets.QMessageBox.information(self,'Run Report','Attach or open telemetry for this Run before generating a report.');return
+        try:self.store.set_active(self.store.runs.index(h))
+        except Exception:pass
+        try:
+            if report_type=='pro_stock_shift':
+                report=attach_shift_report(h.run,profile='pro_stock')
+                report_id,created=self.catalog.save_run_report(str(run_id),report,source_asset_id=h.catalog_asset_id or None,label='Pro Stock Shift Report')
+                self.store.changed.emit()
+                if hasattr(self,'run_workspace'):self.run_workspace.set_run(run_id)
+                self.statusBar().showMessage(('Generated' if created else 'Reused existing')+f' Pro Stock shift report for Run {run_id}.',7000)
+                return
+            raise ValueError(f'Unsupported standardized report type: {report_type}')
+        except Exception as exc:
+            logging.exception('Standard Run report generation failed');QtWidgets.QMessageBox.warning(self,'Run Report',str(exc))
+
     def _open_catalog_run(self, run_id: str):
         record=self.catalog.get_run(run_id)
         if record is None:
@@ -4457,25 +4635,33 @@ class MainWindow(QtWidgets.QMainWindow):
         assets=[a for a in self.catalog.list_assets(run_id) if a.get('asset_type')=='telemetry']
         if not assets:
             QtWidgets.QMessageBox.information(self,'Run Browser','This run does not yet have a telemetry asset attached.');return
-        errors=[];opened=0
+        errors=[];opened=0;existing_count=0
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         try:
             for asset in assets:
                 path=str(asset.get('local_path') or '')
                 try:
+                    existing=next((h for h in self.store.runs if str(h.catalog_asset_id or '')==str(asset['id'])),None)
+                    if existing is not None:
+                        existing_count+=1
+                        if opened==0:
+                            try:self.store.set_active(self.store.runs.index(existing))
+                            except ValueError:pass
+                        continue
                     if not path or not Path(path).is_file():
                         path=ensure_asset_cached(self.catalog,self.tech_services,str(asset['id']))
                     run=load_telemetry(path)
                     session_id=self.catalog.ensure_telemetry_session(str(asset['id']),display_name=str(asset.get('filename') or Path(path).stem),vendor=run.vendor,channel_summary={'channels':len(run.data.columns),'canonical_roles':sorted(run.channel_map.keys())})
                     apply_catalog_run_authority(self.catalog,run_id,run)
                     run.metadata['catalog_asset_id']=asset['id'];run.metadata['catalog_telemetry_session_id']=session_id
-                    h=self.store.add(path,run,activate=(opened==0));h.catalog_run_id=run_id;h.catalog_asset_id=str(asset['id']);h.catalog_session_id=session_id;h.display_name=str(asset.get('filename') or Path(path).stem)
+                    h=self.store.add(path,run,activate=(opened==0 and existing_count==0));h.catalog_run_id=run_id;h.catalog_asset_id=str(asset['id']);h.catalog_session_id=session_id;h.display_name=str(asset.get('filename') or Path(path).stem)
                     opened+=1
                 except Exception as exc:
                     logging.exception('Could not open catalog asset %s',asset.get('id'));errors.append(f"{asset.get('filename')}: {exc}")
         finally:QtWidgets.QApplication.restoreOverrideCursor()
-        if opened:
-            self.statusBar().showMessage(f"Opened catalog run: {record.get('event_name') or 'Local'} — {opened} telemetry asset(s)",7000)
+        if hasattr(self,'run_workspace'):self.run_workspace.set_run(run_id)
+        if opened or existing_count:
+            self.statusBar().showMessage(f"Opened catalog run: {record.get('event_name') or 'Local'} — {opened} opened, {existing_count} already loaded",7000)
         if errors:QtWidgets.QMessageBox.warning(self,'Run Browser','Some assets were unavailable:\n\n'+'\n'.join(errors))
 
     def _case_review_time_changed(self, case_id: str, case_time_s: float):
@@ -4668,7 +4854,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self,'case_browser'): self.case_browser.refresh()
         if hasattr(self,'case_timeline'): self.case_timeline.refresh()
         if hasattr(self,'case_review'): self.case_review.refresh()
-        if handle and hasattr(self,'asset_browser') and handle.catalog_run_id:self.asset_browser.set_run(handle.catalog_run_id)
+        if handle and handle.catalog_run_id:
+            if hasattr(self,'asset_browser'):self.asset_browser.set_run(handle.catalog_run_id)
+            if hasattr(self,'catalog_run_details'):self.catalog_run_details.set_run(handle.catalog_run_id)
+            if hasattr(self,'run_workspace'):self.run_workspace.set_run(handle.catalog_run_id)
         if handle:
             report=assess_plotability(run)
             ws=self.current_sheet()

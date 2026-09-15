@@ -29,3 +29,15 @@
 - Fixed Tech Services 330-ft normalization so `ft330` maps to the canonical `three_thirty_ft_s` field instead of being stranded under an unrecognized key.
 - Run Assets now distinguish **Tech Services**, **Local working attachment**, and scratch/development authority plus remote/cached/managed-local state.
 - Direct **Open Log…** remains scratch-only; the new Run-first attachment action is the only local path that creates an explicit Run association.
+
+## Run-first engineering workspace (dev.5)
+
+- Added a dedicated **Run Workspace** centered on the authoritative NHRA Tech Services Run rather than on a logger filename/session.
+- One view now combines official timing, canonical weather, attached telemetry evidence, class-specific RSA defaults, engineering values, standardized reports and model snapshots.
+- Applying a class layout from an authoritative Run uses the synchronized NHRA category as the profile seed; filename-based Run/category inference is still prohibited.
+- Added catalog schema v8 `run_reports`: standardized derived reports are immutable/fingerprinted Run metadata with optional source-Asset provenance. Re-running an identical report is idempotent.
+- Pro Stock shift reports generated from an authoritative Run are now persisted to the catalog, not only to workbook memory.
+- The Run Workspace compares the latest Pro Stock shift report against the nearest prior report for the same canonical driver/category and flags shift RPM/time deltas that exceed report thresholds.
+- Corrected Tech Services timing translation for 60 ft and 1000 ft values and added canonical 1000-ft MPH support to `TimingData`.
+- Re-opening an already-loaded catalog telemetry Asset now activates the existing session instead of duplicating it.
+- Application identity is now `NHRA.Velocity`; historical source/release records retain their original names.

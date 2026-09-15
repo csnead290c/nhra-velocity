@@ -189,6 +189,7 @@ class TimingData:
     eighth_mile_s: Optional[float] = None
     eighth_mile_mph: Optional[float] = None
     thousand_ft_s: Optional[float] = None
+    thousand_ft_mph: Optional[float] = None
     quarter_mile_s: Optional[float] = None
     quarter_mile_mph: Optional[float] = None
 
@@ -200,6 +201,7 @@ class TimingData:
             "660": "eighth_mile_s", "660ft": "eighth_mile_s", "660ft_s": "eighth_mile_s", "eighth_s": "eighth_mile_s",
             "660_mph": "eighth_mile_mph", "660ft_mph": "eighth_mile_mph", "eighth_mph": "eighth_mile_mph",
             "1000": "thousand_ft_s", "1000ft": "thousand_ft_s", "1000ft_s": "thousand_ft_s",
+            "1000_mph": "thousand_ft_mph", "1000ft_mph": "thousand_ft_mph", "thousand_mph": "thousand_ft_mph",
             "1320": "quarter_mile_s", "1320ft": "quarter_mile_s", "1320ft_s": "quarter_mile_s", "et": "quarter_mile_s",
             "1320_mph": "quarter_mile_mph", "1320ft_mph": "quarter_mile_mph", "mph": "quarter_mile_mph",
         }

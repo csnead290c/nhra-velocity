@@ -127,3 +127,7 @@ It returns the same normalized timing/run identity fields plus the nearest canon
 The re-audit also confirmed that Tech Master has server-side administrative machinery around `parity_runs.event_entry_id` (`deriveFromRuns`, `backfillRunLinks`, `manualLink`, linkage-status/review actions). Those write/admin actions are intentionally **not** called by Velocity. The current read surfaces inspected (`parity.php?action=runs`, `runsWithWeather`, Tech Master entry detail/dossier/link-review) still do not provide a general authoritative mapping of each linked parity Run to its Event Entry. Velocity therefore continues to leave Entry→Run ownership unresolved instead of reproducing the server's matching logic locally.
 
 No source, database, website record, or configuration in `nhratechservices` was changed during this work.
+
+## Run Workspace read-only integration re-audit (v0.38.0-dev.5)
+
+No `nhratechservices` server/repository changes are required for the Run Workspace. Velocity continues to consume the existing authenticated GET surfaces for Events, Entries, parity Runs and canonical weather. Local telemetry attachment, `run_reports`, class/RSA defaults, report comparison and model snapshots remain workstation-local. No filename matching or unapproved EventEntry→Run inference was added. The parity Runs response still does not expose `event_entry_id`, so that relationship remains intentionally unresolved in Velocity.

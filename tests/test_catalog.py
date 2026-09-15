@@ -30,7 +30,7 @@ def _run():
 
 def test_catalog_initializes_run_centric_schema(tmp_path):
     c=_catalog(tmp_path)
-    assert c.schema_version==7
+    assert c.schema_version==8
     stats=c.stats()
     assert set(stats)>={'events','runs','assets','telemetry_sessions','engineering_values','model_snapshots','analysis_cases','analysis_case_runs','analysis_case_evidence','incident_cases'}
     assert all(v==0 for v in stats.values())
@@ -213,7 +213,7 @@ def test_official_event_csv_import_is_idempotent_and_authoritative(tmp_path):
     )
     first=import_official_run_csv(c,p,event_name='PSM Indianapolis Test',event_code='20260908',season=2026)
     assert first.runs_created==2 and first.runs_updated==0
-    assert c.schema_version==7
+    assert c.schema_version==8
     runs=c.list_runs(event_id=first.event_id,limit=10)
     assert len(runs)==2
     gaige=next(x for x in runs if x['driver_name']=='Gaige Herrera')
@@ -283,7 +283,7 @@ def test_catalog_v1_schema_migrates_to_v7_without_losing_run(tmp_path):
     """)
     conn.commit();conn.close()
     c=LocalCatalog(db,object_store=LocalObjectStore(tmp_path/'objects'))
-    assert c.schema_version==7
+    assert c.schema_version==8
     rec=c.get_run('run_old')
     assert np.isclose(rec['timing']['quarter_mile_s'],6.9)
     assert rec['timing_provenance']=='unknown'
@@ -363,7 +363,7 @@ def test_v4_catalog_migrates_to_v7_without_losing_runs(tmp_path):
     e=c.create_event('Legacy',event_code='OLD');r=c.create_run(event_id=e,run_key='old-run')
     with sqlite3.connect(path) as db:db.execute("UPDATE catalog_meta SET value='4' WHERE key='schema_version'")
     reopened=LocalCatalog(path)
-    assert reopened.schema_version==7
+    assert reopened.schema_version==8
     assert reopened.get_run(r)['run_key']=='old-run'
     with reopened._connect() as db:
         cols={row[1] for row in db.execute('PRAGMA table_info(assets)').fetchall()}
@@ -522,7 +522,7 @@ def test_v017_incident_and_run_model_migrate_into_v7_analysis_case(tmp_path):
     """)
     conn.commit();conn.close()
     c=LocalCatalog(db,object_store=LocalObjectStore(tmp_path/'objects'))
-    assert c.schema_version==7
+    assert c.schema_version==8
     migrated=c.get_analysis_case('inc17')
     assert migrated is not None and migrated['case_type']=='incident' and migrated['primary_run_id']=='run17'
     assert c.list_case_runs('inc17')[0]['role']=='primary'
@@ -661,7 +661,7 @@ def test_v6_case_membership_migrates_to_v7_timeline_defaults(tmp_path):
         ''')
         db.commit()
     reopened=LocalCatalog(path,object_store=LocalObjectStore(tmp_path/'objects'))
-    assert reopened.schema_version==7
+    assert reopened.schema_version==8
     align=reopened.get_case_run_alignment(case_id,r)
     assert align is not None and align['time_scale']==1.0 and align['time_offset_s']==0.0 and align['alignment_method']=='run_time'
     assert align['anchors']==[]

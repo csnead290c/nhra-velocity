@@ -101,6 +101,27 @@ def profile_rows() -> list[dict[str, object]]:
     ]
 
 
+def profile_for_category(category: str) -> RunProfile:
+    """Resolve a standard analysis profile from an authoritative class/category label.
+
+    This is deliberately conservative and operates only on explicit category text;
+    it never infers Run identity from filenames or telemetry contents.
+    """
+    token = " ".join(str(category or "").lower().replace("-", " " ).split())
+    if not token:
+        return _BY_KEY["generic_drag"]
+    normalized = token.replace(" ", "")
+    for key in ("pro_stock_motorcycle", "top_fuel", "funny_car", "pro_stock"):
+        p = _BY_KEY[key]
+        for alias in p.aliases:
+            a = " ".join(alias.lower().split())
+            if len(a) < 2:
+                continue
+            if token == a or normalized == a.replace(" ", ""):
+                return p
+    return _BY_KEY["generic_drag"]
+
+
 def infer_profile(run: TelemetryRun) -> RunProfile:
     explicit = str(run.metadata.get("analysis_profile", "") or "").strip()
     if explicit in _BY_KEY:

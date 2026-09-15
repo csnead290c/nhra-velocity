@@ -231,6 +231,23 @@ class LocalCatalog:
                 CREATE INDEX IF NOT EXISTS idx_eng_run_key ON engineering_values(run_id, key);
                 CREATE INDEX IF NOT EXISTS idx_eng_key ON engineering_values(key);
 
+                CREATE TABLE IF NOT EXISTS run_reports(
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+                    source_asset_id TEXT REFERENCES assets(id) ON DELETE SET NULL,
+                    report_type TEXT NOT NULL,
+                    report_version INTEGER NOT NULL DEFAULT 1,
+                    profile TEXT,
+                    label TEXT,
+                    fingerprint_sha256 TEXT NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    generated_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_run_reports_fingerprint ON run_reports(run_id,report_type,fingerprint_sha256);
+                CREATE INDEX IF NOT EXISTS idx_run_reports_run_type ON run_reports(run_id,report_type,created_at);
+
                 CREATE TABLE IF NOT EXISTS analysis_cases(
                     id TEXT PRIMARY KEY,
                     case_type TEXT NOT NULL DEFAULT 'engineering',
@@ -742,6 +759,90 @@ class LocalCatalog:
             c.execute("INSERT INTO engineering_values(id,run_id,key,value_json,unit,provenance,confidence,lower_value,upper_value,method,notes,model_snapshot_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",(rec_id,run_id,key,_json(value),unit,provenance,confidence,lower,upper,method,notes,model_snapshot_id,utc_now()))
         return rec_id
 
+    def list_engineering_values(self, run_id: str, *, latest_only: bool = True) -> List[Dict[str, Any]]:
+        """Return engineering inputs/derived values attached to one canonical Run.
+
+        The catalog is append-only for engineering values so provenance history is
+        retained.  ``latest_only`` gives the ordinary Run Workspace view without
+        discarding the older records from the database.
+        """
+        with self._connect() as c:
+            rows=c.execute("SELECT * FROM engineering_values WHERE run_id=? ORDER BY created_at DESC",(run_id,)).fetchall()
+        out=[];seen=set()
+        for r in rows:
+            d=dict(r);d["value"]=_unjson(d.pop("value_json",None),None)
+            key=str(d.get("key") or "")
+            if latest_only and key in seen:continue
+            seen.add(key);out.append(d)
+        return out
+
+    def save_run_report(self, run_id: str, report: Mapping[str, Any], *, source_asset_id: str | None = None, label: str = "") -> tuple[str, bool]:
+        """Persist a standardized derived report as Run metadata.
+
+        Reports are immutable evidence products keyed by their deterministic
+        fingerprint. Re-running the same analysis is idempotent; changed source
+        data or analysis logic creates a new report record rather than silently
+        replacing history.
+        """
+        payload=dict(report or {})
+        report_type=str(payload.get("report_type") or "").strip()
+        fingerprint=str(payload.get("fingerprint_sha256") or "").strip().lower()
+        if not report_type:raise ValueError("Run report requires report_type")
+        if not fingerprint:raise ValueError("Run report requires fingerprint_sha256")
+        with self._connect() as c:
+            if not c.execute("SELECT 1 FROM runs WHERE id=?",(run_id,)).fetchone():raise KeyError(f"Unknown run {run_id}")
+            if source_asset_id and not c.execute("SELECT 1 FROM assets WHERE id=? AND run_id=?",(source_asset_id,run_id)).fetchone():
+                raise ValueError("source_asset_id must belong to the report Run")
+            row=c.execute("SELECT id FROM run_reports WHERE run_id=? AND report_type=? AND fingerprint_sha256=?",(run_id,report_type,fingerprint)).fetchone()
+        if row:return str(row[0]),False
+        now=utc_now();report_id=new_id("rpt")
+        generated=str(payload.get("generated_at_utc") or payload.get("generated_at") or "")
+        with self.transaction() as c:
+            c.execute("INSERT INTO run_reports(id,run_id,source_asset_id,report_type,report_version,profile,label,fingerprint_sha256,payload_json,generated_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(report_id,run_id,source_asset_id,report_type,int(payload.get("report_version") or 1),str(payload.get("profile") or ""),str(label or payload.get("label") or report_type),fingerprint,_json(payload),generated,now,now))
+        return report_id,True
+
+    def list_run_reports(self, run_id: str, *, report_type: str | None = None, limit: int = 500) -> List[Dict[str, Any]]:
+        where=["run_id=?"];args=[run_id]
+        if report_type:
+            where.append("report_type=?");args.append(str(report_type))
+        args.append(int(limit))
+        with self._connect() as c:
+            rows=c.execute("SELECT * FROM run_reports WHERE "+" AND ".join(where)+" ORDER BY COALESCE(generated_at,created_at) DESC LIMIT ?",args).fetchall()
+        out=[]
+        for r in rows:
+            d=dict(r);d["payload"]=_unjson(d.pop("payload_json",None));out.append(d)
+        return out
+
+    def latest_run_report(self, run_id: str, report_type: str) -> Dict[str, Any] | None:
+        rows=self.list_run_reports(run_id,report_type=report_type,limit=1)
+        return rows[0] if rows else None
+
+    def previous_run_report(self, run_id: str, report_type: str) -> Dict[str, Any] | None:
+        """Return the nearest earlier report for the same driver/category.
+
+        This is intended for standardized compliance/performance trend reports.
+        If the canonical Run does not have a driver identity, no cross-Run guess is
+        attempted.
+        """
+        current=self.get_run(run_id)
+        if not current or not current.get("driver_id"):
+            return None
+        where=["rr.report_type=?","rr.run_id<>?","r.driver_id=?"]
+        args=[str(report_type),str(run_id),str(current.get("driver_id"))]
+        category=str(current.get("category") or "").strip()
+        if category:
+            where.append("COALESCE(r.category,'')=?");args.append(category)
+        run_dt=str(current.get("run_datetime") or "").strip()
+        if run_dt:
+            where.append("COALESCE(r.run_datetime,rr.generated_at,rr.created_at) < ?");args.append(run_dt)
+        sql="""SELECT rr.*,r.run_key,r.run_datetime,r.category,e.name AS event_name,d.name AS driver_name
+            FROM run_reports rr JOIN runs r ON r.id=rr.run_id
+            LEFT JOIN events e ON e.id=r.event_id LEFT JOIN drivers d ON d.id=r.driver_id
+            WHERE """+" AND ".join(where)+" ORDER BY COALESCE(r.run_datetime,rr.generated_at,rr.created_at) DESC LIMIT 1"
+        with self._connect() as c:row=c.execute(sql,args).fetchone()
+        if not row:return None
+        d=dict(row);d["payload"]=_unjson(d.pop("payload_json",None));return d
+
     def create_model_snapshot(self, run_id: str | None = None, *, analysis_case_id: str | None = None, name: str, model_type: str = "vehicle_performance", model_version: str = "", inputs: Mapping[str, Any] | None = None, outputs: Mapping[str, Any] | None = None, quality: Mapping[str, Any] | None = None) -> str:
         if not run_id and not analysis_case_id:
             raise ValueError("ModelSnapshot requires a Run or AnalysisCase owner")
@@ -1188,7 +1289,7 @@ class LocalCatalog:
         return out
 
     def stats(self) -> Dict[str, int]:
-        tables=("events","runs","assets","telemetry_sessions","engineering_values","model_snapshots","analysis_cases","analysis_case_runs","analysis_case_evidence","analysis_case_markers","incident_cases")
+        tables=("events","runs","assets","telemetry_sessions","engineering_values","run_reports","model_snapshots","analysis_cases","analysis_case_runs","analysis_case_evidence","analysis_case_markers","incident_cases")
         out={}
         with self._connect() as c:
             for table in tables: out[table]=int(c.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
