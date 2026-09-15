@@ -1,0 +1,109 @@
+[
+  {
+    "file": "real_motec_S1_2626_20260905_151322.ld",
+    "sha256": "a47e596d041526e75a805af2471c1b468c4ffc9d1dcb9e8bafccb7a24a91a434",
+    "bytes": 6237065,
+    "vendor": "MoTeC",
+    "rows": 36851,
+    "columns": 188,
+    "native_channels": 180,
+    "recorded_channels": 0,
+    "buffer_family": null,
+    "seconds": 0.412,
+    "original_map": {
+      "time_s": "Time",
+      "engine_rpm": "Engine.Speed",
+      "speed_mph": "Rear Wheel Speed",
+      "gear": "Gear",
+      "throttle_pct": "Throttle.Position",
+      "lambda": "Exhaust.Lambda",
+      "wheel_speed_mph": "Rear Wheel Speed"
+    },
+    "warnings": [
+      "Skipped 1 structurally valid MoTeC channel(s) with unsupported encodings: Engine.Synchronisation.Position.."
+    ]
+  },
+  {
+    "file": "real_racepak_BeSea080219Q1.rpk",
+    "sha256": "4e8b252972651f4f8dfc3cf656eadadedf00927d5ef62438aa51a821d3fb3137",
+    "bytes": 367428,
+    "vendor": "RacePak",
+    "rows": 10200,
+    "columns": 13,
+    "native_channels": 0,
+    "recorded_channels": 7,
+    "buffer_family": "CAN_Device",
+    "seconds": 0.082,
+    "original_map": {
+      "time_s": "Time (s)",
+      "engine_rpm": "Engine RPM",
+      "driveshaft_rpm": "DS RPM",
+      "longitudinal_g": "Accel G",
+      "clutch_rpm": "Clutch RPM"
+    },
+    "warnings": []
+  },
+  {
+    "file": "real_racepak_GSSea072426Q2.rpk",
+    "sha256": "a5b37cc9144d7f812180ac7e596c2dfd3eb205429fc42466ecfb2d51433a0c23",
+    "bytes": 3236695,
+    "vendor": "RacePak",
+    "rows": 24750,
+    "columns": 66,
+    "native_channels": 0,
+    "recorded_channels": 57,
+    "buffer_family": "CAN_Device",
+    "seconds": 0.676,
+    "original_map": {
+      "time_s": "Time (s)",
+      "engine_rpm": "Engine RPM",
+      "driveshaft_rpm": "DS RPM",
+      "gear": "EFI Adv Gear",
+      "throttle_pct": "EFI Throttle Pos",
+      "longitudinal_g": "Accel G",
+      "clutch_rpm": "Clutch RPM"
+    },
+    "warnings": []
+  },
+  {
+    "file": "real_racepak_NHGai030726Q4.rpk",
+    "sha256": "346f690cba5641f22f902bc2fad66dcdd5c0387171d79cbb5beb83b6ca73b7fa",
+    "bytes": 2132221,
+    "vendor": "RacePak",
+    "rows": 38400,
+    "columns": 49,
+    "native_channels": 0,
+    "recorded_channels": 43,
+    "buffer_family": "CAN_Device",
+    "seconds": 0.459,
+    "original_map": {
+      "time_s": "Time (s)",
+      "engine_rpm": "TDC RPM",
+      "driveshaft_rpm": "DS RPM",
+      "longitudinal_g": "Accel  G",
+      "wheel_speed_mph": "Front Wheel"
+    },
+    "warnings": []
+  },
+  {
+    "file": "real_racepak_PRBri061326Q4.rpk",
+    "sha256": "f5806c0a1796cb3ea196dcbbba644a2d2057afa436eb1ec483b7bd82c412a5fd",
+    "bytes": 4941384,
+    "vendor": "RacePak",
+    "rows": 106000,
+    "columns": 69,
+    "native_channels": 0,
+    "recorded_channels": 62,
+    "buffer_family": "CAN_Device",
+    "seconds": 1.422,
+    "original_map": {
+      "time_s": "Time (s)",
+      "engine_rpm": "ENGINE",
+      "driveshaft_rpm": "DRIVE SHAFT",
+      "longitudinal_g": "G METER",
+      "boost_psi": "BOOST PRESS",
+      "wheel_speed_mph": "FRONT WHEEL"
+    },
+    "warnings": []
+  }
+]

@@ -1,0 +1,29 @@
+{
+  "product": "NHRA Tech Data",
+  "tagline": "Technical Data, Analysis & Vehicle Performance",
+  "product_version": "0.37.1-development",
+  "formats": {
+    "catalog_schema": 7,
+    "workbook": 8,
+    "analysis_library": 2,
+    "simulation_study": 2,
+    "fit_study": 5,
+    "tech_services_sync_contract": 4
+  },
+  "upstream_references": [
+    {
+      "name": "RacingSystemsAnalysis",
+      "repository": "https://github.com/csnead290c/RacingSystemsAnalysis",
+      "role": "physics/source-fidelity reference",
+      "commit_sha": "1556ac70684908038fe47a9fe54e2f506cc4e71c",
+      "verified": true
+    },
+    {
+      "name": "nhratechservices",
+      "repository": "https://github.com/csnead290c/nhratechservices",
+      "role": "production identity/auth/data/API reference",
+      "commit_sha": "77eb280fe94825f93f2cdfdd3ab2568851aa6a19",
+      "verified": true
+    }
+  ]
+}

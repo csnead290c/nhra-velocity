@@ -1,0 +1,24 @@
+{
+  "file": "S1_#2626_20260908_103002.ld",
+  "channels": [
+    "Engine.Speed",
+    "Rear Wheel Speed",
+    "Throttle.Position",
+    "Gear",
+    "Exhaust.Lambda",
+    "Coolant.Temperature.Sensor.Diagn",
+    "Driver.Launch Switch"
+  ],
+  "cursor_frames": 240,
+  "legacy_seconds": 2.837025733000246,
+  "cached_seconds": 0.01088317299991104,
+  "speedup_x": 260.6800179528007,
+  "legacy_ms_per_frame": 11.820940554167692,
+  "cached_ms_per_frame": 0.045346554166295995,
+  "cache_stats": {
+    "xy_hits": 8,
+    "xy_misses": 7,
+    "interpolation_hits": 1673,
+    "interpolation_misses": 7
+  }
+}

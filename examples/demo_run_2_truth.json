@@ -1,0 +1,22 @@
+{
+  "environment": {
+    "elevation_ft": 32,
+    "temperature_f": 88,
+    "barometer_inhg": 29.55,
+    "humidity_pct": 48,
+    "wind_mph": -1,
+    "wind_angle_deg": 0,
+    "track_temperature_f": 122,
+    "fuel_system": 1
+  },
+  "power_scale": 1.06,
+  "timing": {
+    "sixty_ft_s": 1.341532155883877,
+    "three_thirty_ft_s": 3.232133083271296,
+    "eighth_mile_s": 4.7938458443305665,
+    "eighth_mile_mph": 157.85535220393695,
+    "thousand_ft_s": 6.135069524351404,
+    "quarter_mile_s": 7.264150562377232,
+    "quarter_mile_mph": 199.83820582151802
+  }
+}

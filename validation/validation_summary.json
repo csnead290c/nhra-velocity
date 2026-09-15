@@ -1,0 +1,56 @@
+{
+  "version": "0.19.0-development",
+  "schema_version": 7,
+  "automated_tests": "98/98 passed",
+  "native_selftest": "3/3 passed",
+  "corpus_qualification": "10/10 passed",
+  "us_nationals": {
+    "source_sha256": "73cff489965079dea9808d3dbf15c4e2d0ca8343fe6657ae6bb5f28a5eafb2b5",
+    "first_import": {
+      "rows_seen": 134,
+      "rows_imported": 123,
+      "duplicate_rows_merged": 6,
+      "runs_created": 123,
+      "runs_updated": 0,
+      "drivers_created": 19,
+      "entries_created": 19,
+      "warnings": [
+        "Row 125: skipped because Time, Driver or Class is blank",
+        "Row 127: skipped because Time, Driver or Class is blank",
+        "Row 128: skipped because Time, Driver or Class is blank",
+        "Row 129: skipped because Time, Driver or Class is blank",
+        "Row 130: skipped because Time, Driver or Class is blank"
+      ]
+    },
+    "identical_reimport": {
+      "rows_seen": 134,
+      "rows_imported": 123,
+      "duplicate_rows_merged": 6,
+      "runs_created": 0,
+      "runs_updated": 123,
+      "drivers_created": 0,
+      "entries_created": 0,
+      "warnings": [
+        "Row 125: skipped because Time, Driver or Class is blank",
+        "Row 127: skipped because Time, Driver or Class is blank",
+        "Row 128: skipped because Time, Driver or Class is blank",
+        "Row 129: skipped because Time, Driver or Class is blank",
+        "Row 130: skipped because Time, Driver or Class is blank"
+      ]
+    }
+  },
+  "psm_indianapolis_test": {
+    "source_sha256": "05face80d2958c9311a9def79ab11fed60c855d7849d1cb1278deb1afa0b3286",
+    "import": {
+      "rows_seen": 25,
+      "rows_imported": 25,
+      "duplicate_rows_merged": 0,
+      "runs_created": 25,
+      "runs_updated": 0,
+      "drivers_created": 6,
+      "entries_created": 6,
+      "warnings": []
+    }
+  },
+  "qt_runtime": "not available in validation container; desktop source compile-tested"
+}
