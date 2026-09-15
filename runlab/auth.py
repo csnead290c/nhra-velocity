@@ -9,9 +9,11 @@ a seven-day Bearer token from its direct login endpoint, but it does not expose
 a native-app authorization-code/PKCE or refresh-token flow.
 
 The generic PKCE/session primitives remain here as the preferred future native
-handoff boundary. Production desktop sign-in remains fail-closed until Tech
-Services adds a safe browser/device handoff; HTTP transport mechanics are bound
-separately in ``tech_services_http``.
+handoff boundary.  NHRA Velocity now also has a first-party compatibility
+adapter for the site's existing HTTPS login endpoint: the password is never
+persisted and only the returned seven-day Bearer token may be stored in the OS
+credential vault.  HTTP transport mechanics are bound separately in
+``tech_services_http``.
 """
 
 from dataclasses import asdict, dataclass, field
@@ -95,14 +97,28 @@ class AuthSession:
         available = set(self.identity.scopes) | set(self.tokens.scopes)
         return wanted in available or "*" in available
 
-    def to_secret_payload(self) -> dict[str, Any]:
-        """Serialize only values appropriate for OS credential storage."""
-        return {
+    def to_secret_payload(self, *, include_access_token: bool = False) -> dict[str, Any]:
+        """Serialize only values appropriate for OS credential storage.
+
+        OAuth-style providers normally persist only refresh/offline secrets.
+        The current Tech Services website has no refresh token, so its bound
+        first-party adapter may opt in to storing the seven-day access token in
+        the OS credential vault.  The password is never part of this model.
+        """
+        payload = {
             "refresh_token": self.tokens.refresh_token,
             "offline_grant": self.offline_grant,
             "offline_valid_until_utc": float(self.offline_valid_until_utc or 0.0),
             "identity": asdict(self.identity),
         }
+        if include_access_token:
+            payload.update({
+                "access_token": self.tokens.access_token,
+                "expires_at_utc": float(self.tokens.expires_at_utc),
+                "token_type": self.tokens.token_type,
+                "token_scopes": list(self.tokens.scopes),
+            })
+        return payload
 
 
 @dataclass(frozen=True)
@@ -244,11 +260,12 @@ class AuthManager:
         if not session.identity.user_id:
             raise ValueError("Authenticated session must contain a stable user identity")
         self.session = session
-        if persist and self.credential_store and session.tokens.refresh_token:
+        persist_access = bool(getattr(self.provider, "persist_access_token", False))
+        if persist and self.credential_store and (session.tokens.refresh_token or persist_access):
             self.credential_store.save(
                 self.provider.provider_name,
                 self.credential_account,
-                session.to_secret_payload(),
+                session.to_secret_payload(include_access_token=persist_access),
             )
 
     def restore(self) -> bool:

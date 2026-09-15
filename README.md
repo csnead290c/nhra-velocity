@@ -71,7 +71,7 @@ A headless `strip` command exposes the same analysis for scripting/export. Beam-
 
 v0.25 deliberately advances two long-term pillars together: **NHRA-controlled desktop access** and **RSA/Quarter Pro vehicle simulation**.
 
-The security boundary now assumes the desktop will reuse the existing NHRA Tech Services identity in the system browser through an Authorization Code + PKCE style flow. The desktop never needs the website password or browser cookies. `runlab.auth` provides identity/scopes, PKCE state, short-lived sessions, secure OS credential-vault persistence, bounded offline-entitlement support, and a fail-closed unbound provider. `AuthorizedTechServicesTransport` separately gates Run catalog reads, Asset downloads and derived-analysis writes. Frozen/distributed builds require authorization by default; source development remains runnable until the real Tech Services auth adapter is mapped. See `SECURITY_ARCHITECTURE.md`.
+NHRA Velocity now reuses the existing NHRA Tech Services identity directly. The current website does not expose a browser/device PKCE handoff, so the desktop uses the site's existing first-party HTTPS login endpoint as a compatibility bridge: the password is held only for that request and is never stored, while the returned seven-day Bearer token is kept only in the OS credential vault. Server capabilities are refreshed from the protected capabilities endpoint and mapped to local workstation entitlements; the website remains authoritative on every API call. A browser/device + PKCE flow is still the preferred future replacement when the server supports it. See `SECURITY_ARCHITECTURE.md`.
 
 On the engineering side, `runlab.simulation_study` makes the RSA/Quarter Pro code a repeatable study system rather than a one-off compare-run dialog. Multi-axis scenario sweeps can vary power, weight, aero, traction, final drive, tire, individual gears/shift RPMs and other model variables with either the source-faithful reference solver or smooth optimizer solver. Results carry official-style incrementals/traps and deltas versus baseline; a selected case can become a normal generated comparison session. Portable `.nhrastudy` packages retain the exact vehicle model/dyno, environment, solver/study definition, software version, source Run identity and result table. See `SIMULATION_STUDIES.md`.
 
@@ -116,7 +116,7 @@ There is no Box connection, repository-manifest workflow, file-to-run matcher, o
 
 ## Current Tech Services integration status
 
-The local schema and authorization boundary are ready, and v0.32 now contains a source-verified read-only HTTP client for the website's real Bearer-token API. The audited site still lacks the telemetry workstation's Event → Entry → Run → Asset catalog/download endpoints and a safe native-desktop login handoff, so those pieces remain fail-closed. The app does not reinterpret the site's simulation `run_history`, guess object URLs, infer Run ownership from filenames, or call the website password endpoint from the end-user desktop.
+The local schema and authorization boundary are ready, and the current development build binds the source-verified website login plus protected read APIs without changing the Tech Services repository. Velocity can mirror Tech Master Events, Event Entries, and official normalized parity timing Runs into its local catalog. The audited site still does not expose the parity Run's `event_entry_id` bridge or a permanent Run → Asset manifest/download endpoint, so those relationships remain fail-closed. The app does not reinterpret the site's simulation `run_history`, guess object URLs, infer Run ownership from driver/car/file names, or write application data back to the website.
 
 For development only, **Data → Apply Tech Services Snapshot (Development)…** accepts contract-v4 JSON containing Events, nested Runs, and nested permanent Assets. This exercises the exact local mirror/cache semantics without pretending that the final network API is known.
 
@@ -136,7 +136,7 @@ See `ARCHITECTURE.md`, `DATA_MODEL.md`, `ANALYSIS_CASES.md`, and `SYNC_CONTRACT_
 - Direct **Open Log…** remains available for ad-hoc/scratch analysis, but opening a random local file does not create a permanent catalog Run or attach it to a Tech Services Run.
 - Run-scoped and case-scoped ModelSnapshots remain supported for single-pass and multi-run inverse fitting.
 - **Simulation Study Center** performs repeatable multi-axis RSA/Quarter Pro sweeps and can add selected simulated cases directly to Compare Sessions.
-- **Account** surfaces the Tech Services protection/entitlement state; live sign-in remains fail-closed until the real backend adapter is bound.
+- **Account** signs in with the existing Tech Services account, securely caches only the Bearer token in the OS credential vault, and surfaces the live server capability/entitlement state.
 
 ## Launch
 

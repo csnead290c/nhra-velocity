@@ -92,7 +92,9 @@ from runlab.definition_library import (
     capture_from_run, validate_library, apply_library, run_saved_report, trend_frame, export_report, starter_library,
 )
 from runlab.rule_events import evaluate_event_rules, alarm_states_at
-from runlab.auth import AuthManager, UnboundTechServicesAuthProvider, KeyringCredentialStore, AccessDenied, create_pkce_material
+from runlab.auth import AuthManager, KeyringCredentialStore, AccessDenied
+from runlab.tech_services_auth import WebsiteTechServicesAuthProvider
+from runlab.tech_services_metadata import sync_tech_services_season
 from runlab.security import desktop_auth_required
 from runlab.simulation_study import ScenarioAxis, SimulationStudyDefinition, run_scenario_sweep, export_study_table, create_scenario_run, package_study_result
 from runlab.strip_analysis import analyze_strip
@@ -3169,8 +3171,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setAcceptDrops(True)
         self.setDockOptions(QtWidgets.QMainWindow.AllowNestedDocks | QtWidgets.QMainWindow.AllowTabbedDocks | QtWidgets.QMainWindow.GroupedDragging | QtWidgets.QMainWindow.AnimatedDocks)
         self.catalog=LocalCatalog()
-        self.auth=AuthManager(UnboundTechServicesAuthProvider(),KeyringCredentialStore())
+        self.auth_provider=WebsiteTechServicesAuthProvider()
+        self.auth=AuthManager(self.auth_provider,KeyringCredentialStore())
         self.auth_required=desktop_auth_required()
+        # Canonical Run→Asset transport remains fail-closed until the website
+        # exposes that permanent asset contract. Metadata/timing sync uses the
+        # existing protected GET APIs through self.auth_provider instead.
         self.tech_services=AuthorizedTechServicesTransport(UnboundTechServicesTransport(),self.auth,enforce=self.auth_required)
         self.simulation_studies=[]
         self.compare_sets=CompareSetLibrary()
@@ -3206,6 +3212,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.a_capture_snapshot=QtGui.QAction('Capture Vehicle Model Snapshot…',self); self.a_capture_snapshot.triggered.connect(self._capture_model_snapshot)
         self.a_history=QtGui.QAction('Engineering History…',self); self.a_history.triggered.connect(self._engineering_history)
         self.a_apply_sync=QtGui.QAction('Apply Tech Services Snapshot (Development)…',self); self.a_apply_sync.triggered.connect(self._apply_sync_snapshot)
+        self.a_site_sync=QtGui.QAction('Sync NHRA Tech Services Data…',self); self.a_site_sync.triggered.connect(self._sync_tech_services_data)
         self.a_recovery=QtGui.QAction('Recover Autosave…',self); self.a_recovery.triggered.connect(lambda:self._recover_snapshot(force=True))
         self.a_sheet=QtGui.QAction('New Worksheet',self); self.a_sheet.setShortcut('Ctrl+Shift+N'); self.a_sheet.triggered.connect(lambda:self.add_worksheet())
         self.a_duplicate_sheet=QtGui.QAction('Duplicate Worksheet',self); self.a_duplicate_sheet.setShortcut('Ctrl+Shift+D'); self.a_duplicate_sheet.triggered.connect(self._duplicate_current_sheet)
@@ -3362,7 +3369,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for preset in QUICK_GRAPH_PRESETS:
             qg.addAction(preset, lambda checked=False, name=preset: self._apply_quick_graph(name))
         add=m.addMenu('Add Display'); add.addAction(self.a_wave); add.addAction(self.a_values); add.addAction(self.a_gauge); add.addAction(self.a_region_stats); add.addAction(self.a_scatter); add.addAction(self.a_hist); add.addAction(self.a_spectrum); add.addAction(self.a_load_map); add.addAction(self.a_metric_report); add.addAction(self.a_saved_report); add.addAction(self.a_saved_trend); add.addAction(self.a_strip_model); add.addAction(self.a_envelope); add.addAction(self.a_delta); add.addAction(self.a_comparison_summary); add.addAction(self.a_events); add.addAction(self.a_alarm_status); add.addAction(self.a_notepad); add.addAction(self.a_audit); add.addAction(self.a_sensor_health); add.addAction(self.a_knowledge)
-        m=self.menuBar().addMenu('&Data'); m.addAction('Run Details / Setup…',lambda:self.metadata.setFocus()); m.addAction(self.a_math); m.addAction(self.a_gate); libm=m.addMenu('Analysis Definition Library'); [libm.addAction(a) for a in (self.a_library_import,self.a_library_export,self.a_library_capture,self.a_library_constant,self.a_library_metric,self.a_library_segment,self.a_library_condition,self.a_library_event_rule,self.a_library_report)]; m.addSeparator(); m.addAction(self.a_keep_offline); m.addAction(self.a_capture_snapshot); m.addAction(self.a_history); m.addSeparator(); m.addAction(self.a_apply_sync)
+        m=self.menuBar().addMenu('&Data'); m.addAction('Run Details / Setup…',lambda:self.metadata.setFocus()); m.addAction(self.a_math); m.addAction(self.a_gate); libm=m.addMenu('Analysis Definition Library'); [libm.addAction(a) for a in (self.a_library_import,self.a_library_export,self.a_library_capture,self.a_library_constant,self.a_library_metric,self.a_library_segment,self.a_library_condition,self.a_library_event_rule,self.a_library_report)]; m.addSeparator(); m.addAction(self.a_site_sync); m.addAction(self.a_keep_offline); m.addAction(self.a_capture_snapshot); m.addAction(self.a_history); m.addSeparator(); m.addAction(self.a_apply_sync)
         m.addAction('Data Integrity Audit…',self._show_audit); m.addAction(self.a_sensor_health)
         m=self.menuBar().addMenu('&Analysis')
         m.addAction(self.a_shift_report); m.addSeparator(); m.addAction(self.a_spectrum); m.addAction(self.a_load_map); m.addAction(self.a_metric_report); m.addAction(self.a_saved_report); m.addAction(self.a_saved_trend); m.addAction(self.a_strip_model); m.addAction(self.a_envelope); m.addAction(self.a_comparison_summary); m.addSeparator()
@@ -3403,7 +3410,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ('Add FFT / PSD Spectrum',lambda:self.current_sheet().add_spectrum()),('Add Load / Heat Map',lambda:self.current_sheet().add_load_map()),('Add Segment / KPI Report',lambda:self.current_sheet().add_metric_report()),('Add NHRA Strip / Model Residuals',lambda:self.current_sheet().add_strip_model()),('Add Multi-Run Envelope',lambda:self.current_sheet().add_envelope()),
             ('Add Reference Delta',lambda:self.current_sheet().add_delta()),('Add Run Comparison Summary',lambda:self.current_sheet().add_comparison_summary()),('Add Alarm Status',lambda:self.current_sheet().add_alarm_status()),('Add A-B Region Statistics',lambda:self.current_sheet().add_region_stats()),('Add Sensor Health',lambda:self.current_sheet().add_sensor_health()),
             ('Pro Stock Shift Report…',self._pro_stock_shift_report),('Calculated Channel…',self._new_math_channel),('Data Gate…',self._new_data_gate),('Reconstruct Delivered Power…',self._reconstruct_power),
-            ('Inference Center…',self._inference_center),('Create Compare Run…',self._create_compare_run),('Save Current Compare Set…',self._save_current_compare_set),('Apply Named Compare Set…',self._apply_named_compare_set),('Next Reference Run',lambda:self._step_compare_reference(1)),('Previous Reference Run',lambda:self._step_compare_reference(-1)),('Simulation Study Center…',self._simulation_study_center),('Capture Vehicle Model Snapshot…',self._capture_model_snapshot),('Engineering History…',self._engineering_history),('Keep Active Asset Offline',self._keep_active_offline),
+            ('Inference Center…',self._inference_center),('Create Compare Run…',self._create_compare_run),('Save Current Compare Set…',self._save_current_compare_set),('Apply Named Compare Set…',self._apply_named_compare_set),('Next Reference Run',lambda:self._step_compare_reference(1)),('Previous Reference Run',lambda:self._step_compare_reference(-1)),('Simulation Study Center…',self._simulation_study_center),('Capture Vehicle Model Snapshot…',self._capture_model_snapshot),('Engineering History…',self._engineering_history),('Sync NHRA Tech Services Data…',self._sync_tech_services_data),('Keep Active Asset Offline',self._keep_active_offline),
             ('Run Import / Plot Data Self-Test…',self._run_data_selftest),('Open Diagnostic Log Folder',self._open_log_folder),
         ]
         labels=[x[0] for x in commands]
@@ -3779,17 +3786,21 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.information(self,'Keyboard Shortcuts',text)
 
     def _show_integration_status(self):
+        status=self.auth.status()
         text=(
-            '<b>NHRA Tech Services integration — pinned server audit</b><br><br>'
-            '✓ Protected Event and Event Entry reads are source-verified.<br>'
-            '✓ Normalized parity Run reads are source-verified.<br>'
-            '✓ Desktop local Run/Asset cache, analysis cases and provenance infrastructure are implemented.<br><br>'
-            '<b>Server work still required before authoritative two-way telemetry sync:</b><br>'
-            '• expose Event Entry ownership on the protected Run response;<br>'
-            '• add the permanent Run → Asset manifest/download contract;<br>'
-            '• bind native-app authentication to the production site contract;<br>'
-            '• add controlled AnalysisCase/report/model write-back with audit history.<br><br>'
-            'The desktop continues to fail closed rather than guessing any of those endpoints or relationships.'
+            '<b>NHRA Tech Services integration — existing website contract</b><br><br>'
+            '✓ Uses the same nhratechservices.com account; no second user database.<br>'
+            '✓ Login is sent directly to the existing HTTPS login API; the password is never stored.<br>'
+            '✓ The returned seven-day Bearer token is stored only in the OS credential vault.<br>'
+            '✓ Server capabilities are refreshed from the protected capabilities endpoint.<br>'
+            '✓ Tech Master Events and Event Entries can be mirrored read-only.<br>'
+            '✓ Official normalized parity timing Runs can be mirrored read-only by race_lookup.<br>'
+            f"✓ Current account status: {'signed in' if status.signed_in else 'signed out'}.<br><br>"
+            '<b>Still intentionally fail-closed:</b><br>'
+            '• parity.php does not expose its event_entry_id bridge, so Velocity does not guess Entry→Run ownership;<br>'
+            '• the site does not yet expose a permanent Run→Asset manifest/download API, so telemetry files stay local/manual for now;<br>'
+            '• Velocity performs no Tech Services data writes through this integration.<br><br>'
+            'In other words: we can share identity, event/entry metadata and official timing today without changing the website repository.'
         )
         QtWidgets.QMessageBox.information(self,'Tech Services Integration Status',text)
 
@@ -3939,26 +3950,76 @@ class MainWindow(QtWidgets.QMainWindow):
             f"Provider: {self.auth.provider.provider_name}",
             f"Signed in: {'Yes' if status.signed_in else 'No'}",
             f"Online access: {'Valid' if status.online_access_valid else 'Not valid'}",
-            f"Offline entitlement: {'Valid' if status.offline_access_valid else 'Not valid'}",
+            f"Offline entitlement: {'Valid' if status.offline_access_valid else 'Not available'}",
         ]
         if ident:
-            lines += [f"User: {ident.display_name or ident.email or ident.user_id}",f"Roles: {', '.join(ident.roles) or '—'}",f"Scopes: {', '.join(ident.scopes) or '—'}"]
+            lines += [f"User: {ident.display_name or ident.email or ident.user_id}",f"Roles: {', '.join(ident.roles) or '—'}",f"Capabilities/scopes: {', '.join(ident.scopes) or '—'}"]
         if status.reason:lines.append(f"Status: {status.reason}")
-        lines += ['', 'v0.32 source audit: Tech Services currently uses a Bearer token issued by its website login API. The site does not yet expose a native-desktop PKCE/refresh flow, so protected desktop sign-in remains fail-closed rather than collecting your website password.', 'The HTTP layer is now source-verified and read-only, including Tech Master Event/Entry and normalized parity Run reads. Canonical Entry→Run→Asset sync remains fail-closed until those links are exposed by the server. A future browser/device handoff plus bounded offline entitlement can plug into this access boundary without changing ownership.']
+        lines += ['', 'Velocity uses the existing NHRA Tech Services login API over HTTPS. Your password exists only long enough to perform the login request and is never saved. The returned Bearer token is stored in the operating-system credential vault.', 'The current website does not issue a signed offline entitlement, so a fresh application start still requires the cached token to be validated with Tech Services.']
         QtWidgets.QMessageBox.information(self,'NHRA Tech Services Account','\n'.join(lines))
 
     def _sign_in(self):
-        pkce=create_pkce_material()
+        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle('Sign in to NHRA Tech Services');dlg.resize(470,220)
+        form=QtWidgets.QFormLayout(dlg)
+        email=QtWidgets.QLineEdit();email.setPlaceholderText('name@example.com')
+        password=QtWidgets.QLineEdit();password.setEchoMode(QtWidgets.QLineEdit.Password)
+        note=QtWidgets.QLabel('Uses your existing nhratechservices.com account. Credentials are sent directly to the existing HTTPS login API. The password is never stored; only the seven-day Bearer token is kept in your OS credential vault.')
+        note.setWordWrap(True)
+        form.addRow('Email',email);form.addRow('Password',password);form.addRow(note)
+        buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel);buttons.accepted.connect(dlg.accept);buttons.rejected.connect(dlg.reject);form.addRow(buttons)
+        email.setFocus()
+        if dlg.exec()!=QtWidgets.QDialog.Accepted:return False
+        user=email.text().strip();secret=password.text()
+        if not user or not secret:
+            QtWidgets.QMessageBox.warning(self,'Tech Services sign-in','Email and password are required.');return False
         try:
-            # The real provider will return the existing Tech Services browser-login URL.
-            url=self.auth.provider.authorization_url(redirect_uri='http://127.0.0.1:<ephemeral>/callback',state=pkce.state,code_challenge=pkce.challenge)
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            session=self.auth_provider.sign_in(email=user,password=secret)
+            self.auth.set_session(session,persist=True)
         except Exception as exc:
-            QtWidgets.QMessageBox.information(self,'Tech Services sign-in',f'{exc}\n\nThe v0.32 source audit confirmed the site currently has a direct Bearer-token login API but no native-desktop PKCE/refresh handoff. The protected desktop intentionally does not collect or persist your website password while that server-side handoff is missing.')
-            return
-        QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
+            logging.exception('Tech Services sign-in failed')
+            QtWidgets.QMessageBox.warning(self,'Tech Services sign-in',str(exc));return False
+        finally:
+            # Drop the UI's reference to the password as soon as possible.
+            password.clear();secret=''
+            QtWidgets.QApplication.restoreOverrideCursor()
+        if not self.auth.status().online_access_valid:
+            QtWidgets.QMessageBox.warning(self,'Tech Services sign-in','The account authenticated, but its current Tech Services capabilities do not include NHRA Velocity desktop access.')
+            return False
+        self.statusBar().showMessage(f'Signed in to NHRA Tech Services as {session.identity.display_name or session.identity.email}.',5000)
+        return True
 
     def _sign_out(self):
         self.auth.sign_out();self.statusBar().showMessage('Signed out of NHRA Tech Services.',4000)
+
+    def _sync_tech_services_data(self):
+        if not self.auth.status().online_access_valid:
+            if not self._sign_in():return
+        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle('Sync NHRA Tech Services Data');dlg.resize(460,235)
+        form=QtWidgets.QFormLayout(dlg)
+        year=QtWidgets.QSpinBox();year.setRange(2000,2100);year.setValue(time.gmtime().tm_year)
+        entries=QtWidgets.QCheckBox('Tech Master event entries / roster');entries.setChecked(True)
+        runs=QtWidgets.QCheckBox('Official parity timing runs');runs.setChecked(True)
+        note=QtWidgets.QLabel('This is a read-only pull from nhratechservices.com. Velocity will mirror Events, optional Entries, and official timing Runs into its local catalog. It will not modify the website or infer missing Entry→Run relationships.')
+        note.setWordWrap(True)
+        form.addRow('Season',year);form.addRow('',entries);form.addRow('',runs);form.addRow(note)
+        buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel);buttons.accepted.connect(dlg.accept);buttons.rejected.connect(dlg.reject);form.addRow(buttons)
+        if dlg.exec()!=QtWidgets.QDialog.Accepted:return
+        try:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            client=self.auth_provider.client_for_session(self.auth.session)
+            result=sync_tech_services_season(self.catalog,client,year.value(),include_entries=entries.isChecked(),include_runs=runs.isChecked())
+            self.run_browser.refresh();self.asset_browser.refresh();self.case_browser.refresh();self.case_timeline.refresh();self.case_review.refresh()
+        except Exception as exc:
+            logging.exception('Tech Services metadata sync failed');QtWidgets.QMessageBox.critical(self,'Tech Services Sync',str(exc));return
+        finally:QtWidgets.QApplication.restoreOverrideCursor()
+        message=(f"Read-only Tech Services sync complete for {result.season_year}.\n\n"
+                 f"Events: {result.events_created} new / {result.events_updated} updated\n"
+                 f"Entries: {result.entries_created} new / {result.entries_existing} already present\n"
+                 f"Official timing Runs: {result.runs_created} new / {result.runs_updated} updated")
+        if result.events_without_race_lookup:message+=f"\nEvents without race_lookup: {result.events_without_race_lookup}"
+        if result.warnings:message+='\n\nWarnings:\n'+'\n'.join(result.warnings[:12])
+        QtWidgets.QMessageBox.information(self,'Tech Services Sync',message)
 
 
     def _attach_rsa_model_channels(self):
@@ -4965,16 +5026,18 @@ def main():
     pg.setConfigOptions(antialias=False, background=(20,22,25), foreground=(215,215,215))
     app=QtWidgets.QApplication(sys.argv);app.setOrganizationName(APP_ORG);app.setApplicationName(APP_ID);_style(app)
     win=MainWindow()
+    try:
+        win.auth.restore()
+    except Exception:
+        logging.exception('Could not restore secure Tech Services session')
     if win.auth_required:
-        restored=False
-        try:restored=win.auth.restore()
-        except Exception:logging.exception('Could not restore secure Tech Services session')
         status=win.auth.status()
         if not (status.online_access_valid or status.offline_access_valid):
-            QtWidgets.QMessageBox.critical(win,'NHRA Tech Services sign-in required',
-                'This protected NHRA Velocity build requires an authorized NHRA Tech Services account.\n\n'
-                'The production authentication adapter is not yet bound in this development release, so the application will fail closed rather than run without authorization.')
-            return 4
+            if not win._sign_in():
+                QtWidgets.QMessageBox.critical(win,'NHRA Tech Services sign-in required',
+                    'This protected NHRA Velocity build requires an authorized NHRA Tech Services account.\n\n'
+                    'Sign-in was not completed, so the application will remain closed.')
+                return 4
     win.show()
     def _unhandled(exc_type, exc_value, exc_tb):
         logging.critical('Unhandled application exception', exc_info=(exc_type,exc_value,exc_tb))

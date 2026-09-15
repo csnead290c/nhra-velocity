@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-"""Hardened read-only HTTP boundary for NHRA Tech Services.
+"""Hardened HTTP boundary for NHRA Tech Services.
+
+Application data access is read-only.  The only POST implemented here is the
+existing first-party login exchange used to obtain a Bearer token.
 
 The nhratechservices repository was audited read-only at commit
 77eb280fe94825f93f2cdfdd3ab2568851aa6a19.
@@ -102,7 +105,14 @@ class _SameOriginRedirectHandler(HTTPRedirectHandler):
 
 
 class TechServicesHttpClient:
-    """Small GET-only client for the existing nhratechservices Bearer API."""
+    """Small same-origin client for the existing nhratechservices Bearer API.
+
+    All application-data integration remains read-only.  The sole write-shaped
+    request implemented here is the existing website login exchange, which
+    sends credentials directly to ``/api/auth.php?action=login`` over HTTPS
+    and returns a short-lived Bearer token.  Passwords are never retained by
+    this client.
+    """
 
     user_agent = f"NHRA-Velocity/{__version__}"
 
@@ -177,7 +187,17 @@ class TechServicesHttpClient:
                 raise TechServicesHttpError(f"Tech Services response exceeds configured size limit ({limit} bytes)", url=response.geturl())
         return b"".join(chunks)
 
-    def _get(self, path: str, *, query: Optional[Mapping[str, Any]] = None, limit: int) -> bytes:
+    def _request(
+        self,
+        path: str,
+        *,
+        method: str,
+        query: Optional[Mapping[str, Any]] = None,
+        body: bytes | None = None,
+        content_type: str = "",
+        limit: int,
+        include_bearer: bool = True,
+    ) -> bytes:
         url = self._resolve(path)
         if query:
             clean = {str(k): str(v) for k, v in query.items() if v not in (None, "")}
@@ -188,9 +208,11 @@ class TechServicesHttpClient:
             "User-Agent": self.user_agent,
             "Cache-Control": "no-cache",
         }
-        if self.config.bearer_token:
+        if content_type:
+            headers["Content-Type"] = content_type
+        if include_bearer and self.config.bearer_token:
             headers["Authorization"] = f"Bearer {self.config.bearer_token}"
-        req = Request(url, headers=dict(headers), method="GET")
+        req = Request(url, data=body, headers=dict(headers), method=str(method or "GET").upper())
         try:
             with self._opener.open(req, timeout=float(self.config.timeout_s)) as response:
                 final_url = response.geturl()
@@ -201,12 +223,15 @@ class TechServicesHttpClient:
             raise
         except HTTPError as exc:
             try:
-                body = exc.read(64 * 1024)
+                error_body = exc.read(64 * 1024)
             except Exception:
-                body = b""
-            raise TechServicesHttpError(self._redacted_message(int(exc.code), body), status=int(exc.code), url=url) from exc
+                error_body = b""
+            raise TechServicesHttpError(self._redacted_message(int(exc.code), error_body), status=int(exc.code), url=url) from exc
         except URLError as exc:
             raise TechServicesHttpError(f"Tech Services connection failed: {getattr(exc, 'reason', exc)}", url=url) from exc
+
+    def _get(self, path: str, *, query: Optional[Mapping[str, Any]] = None, limit: int) -> bytes:
+        return self._request(path, method="GET", query=query, limit=limit)
 
     def get_json(self, path: str, *, query: Optional[Mapping[str, Any]] = None) -> Mapping[str, Any]:
         raw = self._get(path, query=query, limit=int(self.config.max_json_bytes))
@@ -221,9 +246,56 @@ class TechServicesHttpClient:
     def get_bytes(self, path: str) -> bytes:
         return self._get(path, limit=int(self.config.max_asset_bytes))
 
+    def _post_json(
+        self,
+        path: str,
+        payload: Mapping[str, Any],
+        *,
+        query: Optional[Mapping[str, Any]] = None,
+        include_bearer: bool = True,
+    ) -> Mapping[str, Any]:
+        raw_body = json.dumps(dict(payload), separators=(",", ":")).encode("utf-8")
+        raw = self._request(
+            path,
+            method="POST",
+            query=query,
+            body=raw_body,
+            content_type="application/json; charset=utf-8",
+            limit=int(self.config.max_json_bytes),
+            include_bearer=include_bearer,
+        )
+        try:
+            value = json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            raise TechServicesHttpError("Tech Services returned invalid JSON", url=self._resolve(path)) from exc
+        if not isinstance(value, Mapping):
+            raise TechServicesHttpError("Tech Services JSON response must be an object", url=self._resolve(path))
+        return value
+
     # Routes below are verified in nhratechservices at TECH_SERVICES_AUDITED_SHA.
+    def login(self, *, email: str, password: str) -> Mapping[str, Any]:
+        """Exchange existing Tech Services credentials for the site's Bearer token.
+
+        This mirrors the audited website login route exactly.  The caller owns
+        the password only for the duration of this call; it is never placed in
+        config, logs, URLs, headers, or persistent state.
+        """
+        user = str(email or "").strip()
+        secret = str(password or "")
+        if not user or not secret:
+            raise ValueError("email and password are required")
+        return self._post_json(
+            "api/auth.php",
+            {"email": user, "password": secret},
+            query={"action": "login"},
+            include_bearer=False,
+        )
+
     def current_user(self) -> Mapping[str, Any]:
         return self.get_json("api/auth.php", query={"action": "me"})
+
+    def capabilities(self) -> Mapping[str, Any]:
+        return self.get_json("api/capabilities-endpoint.php")
 
     def simulation_run_history(self, *, limit: int = 50) -> Mapping[str, Any]:
         # This is the website's saved *simulation* run_history API. It is

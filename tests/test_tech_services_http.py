@@ -37,7 +37,12 @@ def api_server():
                 if self.headers.get("Authorization") != "Bearer test-token":
                     self._json({"error": "Unauthorized"}, 401)
                 else:
-                    self._json({"user": {"id": "7", "email": "engineer@example.com", "role": "admin"}})
+                    self._json({"user": {"id": "7", "email": "engineer@example.com", "name": "Engineer", "role": "admin"}})
+            elif parsed.path == "/api/capabilities-endpoint.php":
+                if self.headers.get("Authorization") != "Bearer test-token":
+                    self._json({"error": "Unauthorized"}, 401)
+                else:
+                    self._json({"plan": "nhra", "role": "admin", "capabilities": ["nhra.tech.read", "nhra.parity", "sim.basic"], "version": "test"})
             elif parsed.path == "/api/runs.php":
                 self._json({"runs": [{"id": "sim-1", "vehicle_name": "Test"}]})
             elif parsed.path == "/api/parity.php":
@@ -101,6 +106,26 @@ def api_server():
             else:
                 self._json({"error": "not found"}, 404)
 
+        def do_POST(self):  # noqa: N802
+            parsed = urlparse(self.path)
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            raw = self.rfile.read(length)
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+            seen.append({
+                "path": parsed.path,
+                "query": parse_qs(parsed.query),
+                "authorization": self.headers.get("Authorization", ""),
+                "method": "POST",
+                "body": body,
+            })
+            if parsed.path == "/api/auth.php" and parse_qs(parsed.query).get("action") == ["login"]:
+                if body.get("email") == "engineer@example.com" and body.get("password") == "correct-horse":
+                    self._json({"success": True, "token": "test-token", "user": {"id": "7", "email": body["email"], "name": "Engineer", "role": "admin"}})
+                else:
+                    self._json({"error": "Invalid credentials"}, 401)
+            else:
+                self._json({"error": "not found"}, 404)
+
         def _json(self, value, code=200):
             body = json.dumps(value).encode("utf-8")
             self.send_response(code)
@@ -125,6 +150,22 @@ def test_production_http_requires_tls_and_disallows_url_credentials():
         TechServicesHttpClient(TechServicesHttpConfig(base_url="http://example.com"))
     with pytest.raises(ValueError, match="credentials"):
         TechServicesHttpClient(TechServicesHttpConfig(base_url="https://user:pass@example.com"))
+
+
+def test_existing_login_exchange_posts_json_without_bearer_and_capabilities_are_protected():
+    with api_server() as (base, seen):
+        anonymous = TechServicesHttpClient(TechServicesHttpConfig(base_url=base, bearer_token="stale-token"))
+        login = anonymous.login(email="engineer@example.com", password="correct-horse")
+        assert login["token"] == "test-token"
+        assert seen[-1]["method"] == "POST"
+        assert seen[-1]["query"]["action"] == ["login"]
+        assert seen[-1]["authorization"] == ""
+        assert seen[-1]["body"] == {"email": "engineer@example.com", "password": "correct-horse"}
+
+        protected = TechServicesHttpClient(TechServicesHttpConfig(base_url=base, bearer_token=login["token"]))
+        caps = protected.capabilities()
+        assert "nhra.tech.read" in caps["capabilities"]
+        assert seen[-1]["authorization"] == "Bearer test-token"
 
 
 def test_verified_existing_api_uses_bearer_get_without_translating_sim_runs():

@@ -103,3 +103,10 @@ The shortest path to a real workstation sync is now small and concrete:
 5. retain server-side capability checks and audit logging.
 
 The desktop mirror/cache layer already supports immutable SHA-256 verified local Assets and permanent Run ownership, so these server changes do not require a local data-model rewrite.
+
+
+## v0.38 implementation addendum
+
+The audited commit remains the current `main` commit as of September 15, 2026. NHRA Velocity now binds the existing `POST /api/auth.php?action=login` route as a first-party compatibility login, then validates/restores sessions through `GET /api/auth.php?action=me` and `GET /api/capabilities-endpoint.php`. The password is not persisted; only the server-issued Bearer token is eligible for OS credential-vault storage.
+
+Velocity also provides a read-only metadata synchronization path that mirrors Tech Master Events and Event Entries plus `parity.php?action=runs` official timing records into the local catalog. It deliberately leaves `Run.entry_id` unset because the protected parity response still does not expose `event_entry_id`. No Tech Services application-data writes are performed, and permanent telemetry Asset synchronization remains disabled until a verified server contract exists.

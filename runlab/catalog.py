@@ -576,9 +576,18 @@ class LocalCatalog:
         return [dict(r) for r in rows]
 
     def find_or_create_entry(self, event_id: str, *, driver_id: str | None = None, vehicle_id: str | None = None, category: str = "", car_number: str = "", remote_id: str = "") -> str:
+        remote=str(remote_id or "").strip()
         with self._connect() as c:
-            row=c.execute("""SELECT id FROM entries WHERE event_id=? AND COALESCE(driver_id,'')=COALESCE(?, '') AND COALESCE(vehicle_id,'')=COALESCE(?, '') AND COALESCE(category,'')=? AND COALESCE(car_number,'')=? ORDER BY created_at LIMIT 1""",(event_id,driver_id,vehicle_id,category,car_number)).fetchone()
-        return str(row[0]) if row else self.create_entry(event_id,driver_id=driver_id,vehicle_id=vehicle_id,category=category,car_number=car_number,remote_id=remote_id)
+            row=None
+            if remote:
+                row=c.execute("SELECT id FROM entries WHERE remote_id=? ORDER BY created_at LIMIT 1",(remote,)).fetchone()
+            if row is None:
+                row=c.execute("""SELECT id,remote_id FROM entries WHERE event_id=? AND COALESCE(driver_id,'')=COALESCE(?, '') AND COALESCE(vehicle_id,'')=COALESCE(?, '') AND COALESCE(category,'')=? AND COALESCE(car_number,'')=? ORDER BY created_at LIMIT 1""",(event_id,driver_id,vehicle_id,category,car_number)).fetchone()
+        if row:
+            if remote and len(row)>1 and not str(row[1] or ""):
+                with self.transaction() as c:c.execute("UPDATE entries SET remote_id=?,updated_at=? WHERE id=?",(remote,utc_now(),row[0]))
+            return str(row[0])
+        return self.create_entry(event_id,driver_id=driver_id,vehicle_id=vehicle_id,category=category,car_number=car_number,remote_id=remote)
 
     def create_run(self, *, event_id: str | None = None, entry_id: str | None = None, driver_id: str | None = None, vehicle_id: str | None = None, run_key: str = "", round: str = "", run_number: str = "", lane: str = "", category: str = "", car_number: str = "", run_datetime: str = "", timing: Mapping[str, Any] | None = None, weather: Mapping[str, Any] | None = None, timing_provenance: str = "unknown", weather_provenance: str = "unknown", source: Mapping[str, Any] | None = None, notes: str = "", remote_id: str = "", sync_state: str = "local") -> str:
         now=utc_now(); run_id=new_id("run")

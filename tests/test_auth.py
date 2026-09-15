@@ -64,3 +64,19 @@ def test_unbound_provider_never_restores_cached_identity():
     mgr=AuthManager(UnboundTechServicesAuthProvider(),store)
     assert mgr.restore() is False
     assert mgr.session is None
+
+
+def test_access_token_can_be_persisted_only_for_opt_in_provider():
+    class AccessTokenProvider(UnboundTechServicesAuthProvider):
+        persist_access_token = True
+
+        def restore_offline_session(self, payload):
+            return None
+
+    store=MemoryCredentialStore();mgr=AuthManager(AccessTokenProvider(),store)
+    s=session(exp=2000.0, refresh="")
+    mgr.set_session(s)
+    payload=store.load("nhra-tech-services","default")
+    assert payload["access_token"] == "a"
+    assert payload["expires_at_utc"] == 2000.0
+    assert "password" not in payload

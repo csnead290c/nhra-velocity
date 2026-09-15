@@ -1,4 +1,4 @@
-# NHRA Tech Data — Security & Access Architecture (v0.33)
+# NHRA Velocity — Security & Access Architecture (v0.38)
 
 ## Objective
 
@@ -8,9 +8,9 @@ A read-only audit of `csnead290c/nhratechservices` at commit `77eb280fe94825f93f
 
 ## Native desktop sign-in status
 
-The preferred production native-app design remains a browser/device handoff that lets Tech Services authenticate the user without the desktop collecting the website password. PKCE is still a strong fit if Tech Services adds an authorization-code bridge, but v0.33 does not pretend that bridge exists today.
+The preferred long-term native-app design remains a browser/device handoff that lets Tech Services authenticate the user without the desktop collecting the website password. PKCE is still a strong fit if Tech Services adds an authorization-code bridge. The current website does not expose that bridge, but it does expose a first-party HTTPS login API that returns the same seven-day Bearer token used by the web client.
 
-Until that server-side handoff exists, a protected/frozen desktop remains fail-closed. Development and integration tooling can use an explicitly supplied Bearer token for source-verified GET requests, but that is a testing seam rather than the final end-user sign-in UX.
+NHRA Velocity now uses that existing login route as a compatibility bridge so protected builds can share the production identity system without any Tech Services repository change. The desktop presents its own first-party login dialog, sends email/password only to the configured Tech Services HTTPS origin, never stores or logs the password, immediately refreshes the account's server-side capabilities, and stores only the returned Bearer token in the OS credential vault. This is intentionally replaceable by the browser/device flow below when the server adds it.
 
 A future PKCE/browser handoff would work as follows:
 
@@ -33,8 +33,10 @@ This is a **server addition still required**, not a description of the current w
 - explicit offline-entitlement window support;
 - refresh/revoke provider boundary;
 - `KeyringCredentialStore`, which uses the platform credential vault and has **no plaintext-file fallback**;
-- fail-closed `UnboundTechServicesAuthProvider` until the website exposes a safe native-desktop handoff.
-- source-verified Bearer HTTP mechanics in `runlab.tech_services_http` for read-only integration/probing.
+- `WebsiteTechServicesAuthProvider`, which binds the audited direct-login route without persisting the password;
+- secure persistence of the current site's access token only when a provider explicitly opts in, with no plaintext fallback;
+- online validation of a cached token against `auth.php?action=me` plus the protected capabilities endpoint before restoring a desktop session;
+- source-verified Bearer HTTP mechanics in `runlab.tech_services_http` for read-only application-data integration.
 
 `runlab.transport.AuthorizedTechServicesTransport` enforces independent scopes before a network operation is attempted:
 
@@ -104,13 +106,13 @@ Long-term defense in depth:
 
 The v0.32 source audit resolves the basic auth mechanism and current-user/run-history behavior. Remaining production items are:
 
-- add a safe native-desktop browser/device authorization handoff; PKCE authorization code is the preferred design;
-- define refresh/revocation semantics and refresh-token rotation if long-lived desktop sessions are required;
-- define access-token audience/desktop claims or map server roles/capabilities into workstation entitlements;
+- optionally add a browser/device authorization handoff; PKCE authorization code remains the preferred long-term design;
+- define refresh/revocation semantics and refresh-token rotation if sessions longer than the current seven-day Bearer token are required;
+- optionally add an explicit desktop audience/claim; current Velocity access is mapped conservatively from the live server capability set;
 - add bounded signed offline entitlement issuance/verification for track use;
 - expose the existing Entry→Run bridge through the Run read API and add authoritative permanent Run→Asset catalog/download endpoints;
 - enforce server-side authorization on Run/Asset/case/model endpoints;
 - add audit logging for protected downloads and approved derived-analysis writes;
 - expose public verification metadata if offline token/JWS verification is required.
 
-The current direct login endpoint can remain for the website. The desktop does **not** need another password database, and v0.33 intentionally does not call that password endpoint from the end-user desktop.
+The desktop does **not** create another password database. It calls the existing first-party login endpoint only for the credential exchange, then discards the password and uses the server-issued Bearer token for protected reads.

@@ -251,7 +251,7 @@ This layer is intentionally transport-neutral. Future live telemetry may evaluat
 
 ## 18. Desktop authentication / authorization boundary
 
-v0.25 adds `runlab.auth` and `runlab.security` without inventing the website's HTTP endpoints. The intended production client is a public native application: authentication occurs in the system browser using the existing Tech Services login and an Authorization Code + PKCE bridge. Passwords/browser cookies are never captured by the desktop. Access tokens are short-lived/in-memory; refresh or signed offline grants are persisted only through the OS credential vault.
+`runlab.auth` and `runlab.security` reuse the existing Tech Services identity rather than inventing a second account system. Because the audited website does not yet expose an Authorization Code + PKCE bridge, the current first-party adapter performs the existing HTTPS email/password login exchange, immediately discards the password, refreshes server capabilities, and persists only the seven-day Bearer token in the OS credential vault. The provider boundary deliberately remains compatible with a future browser/device PKCE handoff.
 
 `AuthorizedTechServicesTransport` applies least-privilege scopes before provider calls (`runs.read`, `assets.read`, `analysis.write`). Feature-level checks such as `simulation.use` use the same identity/entitlement model. Frozen builds require authorization by default and fail closed when no validated online/offline session exists. Source development remains available until the real provider adapter is bound. See `SECURITY_ARCHITECTURE.md`.
 
