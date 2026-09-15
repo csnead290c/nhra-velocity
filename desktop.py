@@ -4008,8 +4008,8 @@ class MainWindow(QtWidgets.QMainWindow):
         form=QtWidgets.QFormLayout(dlg)
         year=QtWidgets.QSpinBox();year.setRange(2000,2100);year.setValue(time.gmtime().tm_year)
         entries=QtWidgets.QCheckBox('Tech Master event entries / roster');entries.setChecked(True)
-        runs=QtWidgets.QCheckBox('Official parity timing runs');runs.setChecked(True)
-        note=QtWidgets.QLabel('This is a read-only pull from nhratechservices.com. Velocity will mirror Events, optional Entries, and official timing Runs into its local catalog. It will not modify the website or infer missing Entry→Run relationships.')
+        runs=QtWidgets.QCheckBox('Official timing runs + canonical weather');runs.setChecked(True)
+        note=QtWidgets.QLabel("This is a read-only pull from nhratechservices.com. Velocity will mirror Events, optional Entries, and official timing Runs into its local catalog, including the website's nearest canonical weather when available. It will not modify the website or infer missing Entry→Run relationships.")
         note.setWordWrap(True)
         form.addRow('Season',year);form.addRow('',entries);form.addRow('',runs);form.addRow(note)
         buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel);buttons.accepted.connect(dlg.accept);buttons.rejected.connect(dlg.reject);form.addRow(buttons)
@@ -4025,7 +4025,9 @@ class MainWindow(QtWidgets.QMainWindow):
         message=(f"Read-only Tech Services sync complete for {result.season_year}.\n\n"
                  f"Events: {result.events_created} new / {result.events_updated} updated\n"
                  f"Entries: {result.entries_created} new / {result.entries_existing} already present\n"
-                 f"Official timing Runs: {result.runs_created} new / {result.runs_updated} updated")
+                 f"Official timing Runs: {result.runs_created} new / {result.runs_updated} updated\n"
+                 f"Runs with canonical weather: {result.runs_with_weather}")
+        if result.weather_fallback_events:message+=f"\nEvents using timing-only fallback: {result.weather_fallback_events}"
         if result.events_without_race_lookup:message+=f"\nEvents without race_lookup: {result.events_without_race_lookup}"
         if result.warnings:message+='\n\nWarnings:\n'+'\n'.join(result.warnings[:12])
         QtWidgets.QMessageBox.information(self,'Tech Services Sync',message)

@@ -139,7 +139,7 @@ Once the real source repository/API is available, the adapter should wrap the ex
 
 ## 9. Data authority
 
-Official timing/weather from Tech Services remain authoritative. Logger metadata can assist analysis but cannot silently overwrite official values.
+Official timing/weather from Tech Services remain authoritative. Logger metadata can assist analysis but cannot silently overwrite official values. The current verified metadata bridge prefers `parity.php?action=runsWithWeather`, translating its nearest canonical weather sample into Velocity environment fields while retaining the server weather timestamp, join delta, and provenance metadata; if that GET surface is unavailable the client falls back to timing-only Run sync.
 
 Raw server Asset bytes remain immutable. User math, filters, reconstructions, annotations, time mappings, engineering values and model snapshots are distinct derived state with provenance.
 

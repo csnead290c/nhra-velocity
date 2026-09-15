@@ -65,8 +65,27 @@ def _timing(row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _weather(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Translate the site's canonical-weather payload into Velocity names.
+
+    Provenance/join metadata is intentionally retained beside the canonical
+    Environment fields. Unknown keys remain evidence; ``Environment.from_dict``
+    simply ignores fields it does not model.
+    """
     value = row.get("weather")
-    return dict(value) if isinstance(value, Mapping) else None
+    if not isinstance(value, Mapping):
+        return None
+    raw = dict(value)
+    aliases = {
+        "temp_f": "temperature_f",
+        "pressure_inhg": "barometer_inhg",
+        "rh_pct": "humidity_pct",
+        "wind_speed_mph": "wind_mph",
+        "wind_dir_deg": "wind_angle_deg",
+    }
+    for source, target in aliases.items():
+        if raw.get(source) not in (None, "") and target not in raw:
+            raw[target] = raw[source]
+    return raw
 
 
 @dataclass
@@ -78,6 +97,8 @@ class MetadataSyncResult:
     entries_existing: int = 0
     runs_created: int = 0
     runs_updated: int = 0
+    runs_with_weather: int = 0
+    weather_fallback_events: int = 0
     events_without_race_lookup: int = 0
     warnings: list[str] = field(default_factory=list)
 
@@ -167,6 +188,8 @@ def _sync_run(catalog: LocalCatalog, event_id: str, row: Mapping[str, Any]) -> b
             "entry_link_status": "server_not_exposed",
             "source_ref": str(row.get("source_ref") or ""),
             "row_hash": str(row.get("row_hash") or ""),
+            "incident_count": row.get("incident_count"),
+            "weather_join": dict(row.get("weather")) if isinstance(row.get("weather"), Mapping) else None,
         },
         remote_id=remote_run,
         sync_state="synced",
@@ -238,15 +261,41 @@ def sync_tech_services_season(
                 result.events_without_race_lookup += 1
                 continue
             offset = 0
-            page_size = 1000
+            page_size = 2000
+            use_weather_endpoint = hasattr(client, "parity_runs_with_weather")
+            weather_endpoint_failed = False
             while True:
                 try:
-                    run_payload = client.parity_runs(race_lookup=race_lookup, dq="include", include_bad=True, limit=page_size, offset=offset)
+                    if use_weather_endpoint and not weather_endpoint_failed:
+                        run_payload = client.parity_runs_with_weather(
+                            race_lookup=race_lookup, window_minutes=30, limit=page_size, offset=offset
+                        )
+                    else:
+                        # Backward-compatible/read-only fallback for deployments
+                        # where the verified weather-join action is unavailable.
+                        run_payload = client.parity_runs(
+                            race_lookup=race_lookup, dq="include", include_bad=True,
+                            limit=page_size, offset=offset,
+                        )
                 except Exception as exc:
+                    if use_weather_endpoint and not weather_endpoint_failed:
+                        weather_endpoint_failed = True
+                        result.weather_fallback_events += 1
+                        result.warnings.append(
+                            f"{name}: canonical weather join unavailable; timing-only Run sync used ({exc})"
+                        )
+                        continue
                     result.warnings.append(f"{name}: official runs were not synchronized ({exc})")
                     break
                 runs = run_payload.get("runs") or []
                 if not isinstance(runs, list):
+                    if use_weather_endpoint and not weather_endpoint_failed:
+                        weather_endpoint_failed = True
+                        result.weather_fallback_events += 1
+                        result.warnings.append(
+                            f"{name}: canonical weather response had no runs array; timing-only Run sync used"
+                        )
+                        continue
                     result.warnings.append(f"{name}: parity response did not contain a runs array")
                     break
                 for run in runs:
@@ -259,6 +308,7 @@ def sync_tech_services_season(
                         continue
                     result.runs_created += int(created)
                     result.runs_updated += int(not created)
+                    result.runs_with_weather += int(isinstance(run.get("weather"), Mapping))
                 offset += len(runs)
                 total = int(run_payload.get("total") or 0)
                 if not runs or len(runs) < page_size or (total and offset >= total):

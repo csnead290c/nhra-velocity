@@ -57,6 +57,23 @@ def api_server():
                         "offset": int(q.get("offset", [0])[0]),
                         "raceLookup": q.get("raceLookup", [""])[0],
                     })
+                elif q.get("action") == ["runsWithWeather"]:
+                    self._json({
+                        "runs": [{
+                            "id": 101, "uuid": "run-uuid-1", "race_lookup": q.get("raceLookup", [""])[0],
+                            "driver_name": "Test Rider", "car_number": "7", "ft1320": 6.75, "mph1320": 200.0,
+                            "weather": {
+                                "timestamp_utc": "2026-09-08 14:30:00", "temp_f": 82.5, "rh_pct": 47.0,
+                                "pressure_inhg": 29.18, "delta_seconds": -12,
+                                "canonical_source_kind": "mixed", "sample_count": 4,
+                            },
+                        }],
+                        "total": 1, "joinedCount": 1,
+                        "windowMinutes": int(q.get("windowMinutes", [30])[0]),
+                        "limit": int(q.get("limit", [500])[0]),
+                        "offset": int(q.get("offset", [0])[0]),
+                        "raceLookup": q.get("raceLookup", [""])[0],
+                    })
                 else:
                     self._json({"error": "unknown parity action"}, 400)
             elif parsed.path == "/api/tm-events.php":
@@ -216,12 +233,28 @@ def test_verified_tech_master_and_parity_metadata_reads_do_not_infer_entry_links
         assert q["offset"] == ["0"]
         assert q["includeBad"] == ["1"]
 
+        enriched = client.parity_runs_with_weather(
+            race_lookup="20260908", category="PRO STOCK MOTORCYCLE", driver_name="Test",
+            lane="1", round_name="T1", window_minutes=999, limit=99999, offset=-5,
+        )
+        assert enriched["runs"][0]["weather"]["temp_f"] == 82.5
+        q = seen[-1]["query"]
+        assert q["action"] == ["runsWithWeather"]
+        assert q["raceLookup"] == ["20260908"]
+        assert q["windowMinutes"] == ["240"]
+        assert q["limit"] == ["2000"]
+        assert q["offset"] == ["0"]
+        assert "includeBad" not in q
+        assert "dq" not in q
+
 
 def test_verified_metadata_read_argument_validation():
     with api_server() as (base, _seen):
         client = TechServicesHttpClient(TechServicesHttpConfig(base_url=base))
         with pytest.raises(ValueError, match="YYYYMMDD"):
             client.parity_runs(race_lookup="Indy")
+        with pytest.raises(ValueError, match="YYYYMMDD"):
+            client.parity_runs_with_weather(race_lookup="Indy")
         with pytest.raises(ValueError, match="dq must"):
             client.parity_runs(race_lookup="20260908", dq="maybe")
         with pytest.raises(ValueError, match="event_id"):

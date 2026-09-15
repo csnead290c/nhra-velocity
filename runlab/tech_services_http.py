@@ -15,6 +15,7 @@ the workstation:
 - Tech Master Events through ``tm-events.php``;
 - Tech Master Event Entries through ``tm-entries.php``;
 - normalized NHRA timing Runs through ``parity.php?action=runs``;
+- weather-enriched normalized Runs through ``parity.php?action=runsWithWeather``;
 - the older ``runs.php`` saved-simulation history (kept deliberately separate).
 
 The database also contains ``parity_runs.event_entry_id`` as the intended
@@ -348,6 +349,48 @@ class TechServicesHttpClient:
             query["dq"] = value
         if include_bad:
             query["includeBad"] = 1
+        return self.get_json("api/parity.php", query=query)
+
+    def parity_runs_with_weather(
+        self,
+        *,
+        race_lookup: str,
+        category: str = "",
+        class_index: str = "",
+        driver_name: str = "",
+        lane: str = "",
+        round_name: str = "",
+        window_minutes: int = 30,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> Mapping[str, Any]:
+        """Read official timing Runs joined to nearest canonical site weather.
+
+        This binds the verified ``parity.php?action=runsWithWeather`` GET
+        surface. The endpoint still does not expose ``event_entry_id``; this
+        method therefore enriches weather only and must not be used to infer
+        Entry ownership.
+        """
+        lookup = str(race_lookup or "").strip()
+        if not re.fullmatch(r"\d{8}", lookup):
+            raise ValueError("race_lookup must be YYYYMMDD")
+        query: dict[str, Any] = {
+            "action": "runsWithWeather",
+            "raceLookup": lookup,
+            "windowMinutes": max(1, min(int(window_minutes), 240)),
+            "limit": max(1, min(int(limit), 2000)),
+            "offset": max(0, int(offset)),
+        }
+        if category:
+            query["category"] = str(category).strip()
+        elif class_index:
+            query["classIndex"] = str(class_index).strip()
+        if driver_name:
+            query["driverName"] = str(driver_name).strip()
+        if lane != "":
+            query["lane"] = str(lane).strip()
+        if round_name != "":
+            query["round"] = str(round_name).strip()
         return self.get_json("api/parity.php", query=query)
 
     def tech_master_events(

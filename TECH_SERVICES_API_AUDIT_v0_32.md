@@ -115,3 +115,15 @@ Velocity also provides a read-only metadata synchronization path that mirrors Te
 ## Local working attachment bridge (v0.38 development)
 
 Until the website exposes a verified permanent Run→Asset manifest/upload/download contract, Velocity can explicitly associate a local telemetry file with a user-selected synchronized Run. The bytes are copied into local SHA-256-addressed managed storage and the association is marked `local_working_copy`. This does not call a Tech Services write endpoint, does not generate a remote Asset ID, and does not weaken the prohibition on filename/name/number matching. Permanent server Asset synchronization remains fail-closed.
+
+## Canonical weather + linkage re-audit (v0.38.0-dev.4)
+
+A second read-only pass over the same pinned Tech Services commit verified another useful existing GET surface:
+
+- `GET /api/parity.php?action=runsWithWeather&raceLookup=YYYYMMDD`
+
+It returns the same normalized timing/run identity fields plus the nearest canonical weather record within a configurable window. The weather object includes canonical timestamp, temperature, humidity, pressure, time delta from the Run, and—when the deployed schema supports it—canonical source kind/detail and sample provenance. Velocity now prefers this GET during metadata sync and falls back to the timing-only `action=runs` GET if the weather-join surface is unavailable.
+
+The re-audit also confirmed that Tech Master has server-side administrative machinery around `parity_runs.event_entry_id` (`deriveFromRuns`, `backfillRunLinks`, `manualLink`, linkage-status/review actions). Those write/admin actions are intentionally **not** called by Velocity. The current read surfaces inspected (`parity.php?action=runs`, `runsWithWeather`, Tech Master entry detail/dossier/link-review) still do not provide a general authoritative mapping of each linked parity Run to its Event Entry. Velocity therefore continues to leave Entry→Run ownership unresolved instead of reproducing the server's matching logic locally.
+
+No source, database, website record, or configuration in `nhratechservices` was changed during this work.
