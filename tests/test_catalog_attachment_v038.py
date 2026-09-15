@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pandas as pd
+
+from runlab.catalog import LocalCatalog
+from runlab.catalog_bridge import register_opened_telemetry
+from runlab.local_store import LocalObjectStore
+from runlab.models import Environment, TelemetryRun, TimingData
+
+
+def _catalog(tmp_path: Path) -> LocalCatalog:
+    return LocalCatalog(path=tmp_path / "catalog.sqlite", object_store=LocalObjectStore(tmp_path / "objects"))
+
+
+def test_explicit_local_attachment_uses_selected_canonical_run_and_inherits_official_context(tmp_path: Path):
+    catalog = _catalog(tmp_path)
+    event_id = catalog.create_event(
+        "PSM Indianapolis Test",
+        season=2026,
+        event_code="20260908",
+        remote_id="evt-12",
+        sync_state="synced",
+    )
+    run_id = catalog.create_run(
+        event_id=event_id,
+        run_key="tech-services:run-101",
+        round="T1",
+        category="PRO STOCK MOTORCYCLE",
+        car_number="1",
+        run_datetime="2026-09-08 14:30:00",
+        timing={
+            "sixty_foot_s": 1.04,
+            "three_thirty_ft_s": 2.85,
+            "eighth_mile_s": 4.33,
+            "quarter_mile_s": 6.72,
+            "quarter_mile_mph": 201.0,
+            "reaction_time_s": 0.051,
+        },
+        weather={"temperature_f": 72.0, "barometer_inhg": 29.83, "humidity_pct": 42.0},
+        timing_provenance="official",
+        weather_provenance="official",
+        source={"kind": "nhratechservices_parity", "remote_id": "run-101"},
+        remote_id="run-101",
+        sync_state="synced",
+    )
+
+    source = tmp_path / "logger.csv"
+    source.write_text("time,engine_rpm\n0,5000\n0.1,6000\n")
+    decoded = TelemetryRun(
+        name="logger",
+        data=pd.DataFrame({"time_s": [0.0, 0.1], "engine_rpm": [5000.0, 6000.0]}),
+        channel_map={"time_s": "time_s", "engine_rpm": "engine_rpm"},
+        vendor="generic",
+        timing=TimingData(quarter_mile_s=9.99),
+        environment=Environment(temperature_f=100.0),
+        metadata={"timing_provenance": {"quarter_mile_s": "user"}, "environment_provenance": {"temperature_f": "user"}},
+    )
+
+    actual_run_id, asset_id, session_id = register_opened_telemetry(
+        catalog,
+        str(source),
+        decoded,
+        run_id=run_id,
+        managed=True,
+        local_attachment=True,
+    )
+
+    assert actual_run_id == run_id
+    assert session_id
+    asset = catalog.get_asset(asset_id)
+    assert asset is not None
+    assert asset["run_id"] == run_id
+    assert asset["source_kind"] == "local_dev"
+    assert asset["storage_mode"] == "managed"
+    assert Path(asset["local_path"]).is_file()
+    assert asset["metadata"]["attachment_mode"] == "local_working_copy"
+    assert asset["metadata"]["server_persistence"] is False
+
+    # Official catalog data wins over values embedded/edited in the logger session.
+    assert decoded.timing.quarter_mile_s == 6.72
+    assert decoded.timing.three_thirty_ft_s == 2.85
+    assert decoded.environment.temperature_f == 72.0
+    assert decoded.metadata["official_timing"]["reaction_time_s"] == 0.051
+    assert decoded.metadata["catalog_run_id"] == run_id
+
+    persisted = catalog.get_run(run_id)
+    assert persisted is not None
+    assert persisted["timing_provenance"] == "official"
+    assert persisted["weather_provenance"] == "official"
+    assert persisted["timing"]["quarter_mile_s"] == 6.72
+    assert persisted["weather"]["temperature_f"] == 72.0
+
+
+def test_local_attachment_requires_explicit_run_identity(tmp_path: Path):
+    catalog = _catalog(tmp_path)
+    source = tmp_path / "logger.csv"
+    source.write_text("time,engine_rpm\n0,5000\n0.1,6000\n")
+    decoded = TelemetryRun(
+        name="logger",
+        data=pd.DataFrame({"time_s": [0.0, 0.1], "engine_rpm": [5000.0, 6000.0]}),
+        channel_map={"time_s": "time_s", "engine_rpm": "engine_rpm"},
+    )
+
+    try:
+        register_opened_telemetry(catalog, str(source), decoded, managed=True, local_attachment=True)
+    except ValueError as exc:
+        assert "explicit canonical run_id" in str(exc)
+    else:
+        raise AssertionError("local attachment must fail closed without an explicit Run")

@@ -10,7 +10,7 @@ import numpy as np
 from .branding import PRODUCT_VERSION
 from .catalog import LocalCatalog
 from .knowledge import vehicle_inputs
-from .models import TelemetryRun
+from .models import TelemetryRun, Environment, TimingData
 from .telemetry import detect_drag_pass_window
 
 
@@ -29,7 +29,49 @@ def channel_summary(run: TelemetryRun) -> Dict[str, Any]:
     }
 
 
-def register_opened_telemetry(catalog: LocalCatalog, path: str, run: TelemetryRun, *, managed: bool = False) -> tuple[str, str, str]:
+def apply_catalog_run_authority(catalog: LocalCatalog, run_id: str, run: TelemetryRun) -> dict[str, Any]:
+    """Hydrate a decoded logger session with authoritative catalog context.
+
+    The catalog record wins for official timing/weather. Raw logger channels and
+    native metadata remain untouched. The complete official values are also
+    retained in metadata so fields that are not represented by ``TimingData``
+    (RT, DQ, MOV, etc.) remain available to downstream displays/reporting.
+    """
+    record=catalog.get_run(run_id)
+    if record is None:
+        raise KeyError(f"Unknown catalog run {run_id}")
+    timing=record.get("timing") or {}
+    weather=record.get("weather") or {}
+    if timing:
+        run.timing=TimingData.from_dict(timing)
+    if weather:
+        run.environment=Environment.from_dict(weather)
+    run.metadata["catalog_run_id"]=run_id
+    run.metadata["catalog_run_key"]=str(record.get("run_key") or "")
+    run.metadata["catalog_event_id"]=str(record.get("event_id") or "")
+    run.metadata["catalog_event_name"]=str(record.get("event_name") or "")
+    run.metadata["catalog_driver_name"]=str(record.get("driver_name") or "")
+    run.metadata["catalog_category"]=str(record.get("category") or "")
+    run.metadata["catalog_car_number"]=str(record.get("car_number") or "")
+    run.metadata["catalog_round"]=str(record.get("round") or "")
+    run.metadata["catalog_run_datetime"]=str(record.get("run_datetime") or "")
+    run.metadata["official_timing"]=dict(timing)
+    run.metadata["official_weather"]=dict(weather)
+    run.metadata["official_timing_provenance"]=str(record.get("timing_provenance") or "unknown")
+    run.metadata["official_weather_provenance"]=str(record.get("weather_provenance") or "unknown")
+    run.metadata["official_source"]=dict(record.get("source") or {})
+    return record
+
+
+def register_opened_telemetry(
+    catalog: LocalCatalog,
+    path: str,
+    run: TelemetryRun,
+    *,
+    run_id: str | None = None,
+    managed: bool = False,
+    local_attachment: bool = False,
+) -> tuple[str, str, str]:
     try:
         window=detect_drag_pass_window(run)
         launch=float(window.launch_time_s)
@@ -38,19 +80,31 @@ def register_opened_telemetry(catalog: LocalCatalog, path: str, run: TelemetryRu
         method=f"auto launch detection ({window.confidence})"
     except Exception:
         offset=0.0; method="provisional identity"
+    metadata={
+        "application_version": PRODUCT_VERSION,
+        "import_decoder": run.metadata.get("import_decoder", ""),
+        "import_probe_reason": run.metadata.get("import_probe_reason", ""),
+        "data_warnings": list(run.metadata.get("data_warnings", []) or []),
+        "source_name": run.name,
+    }
+    if local_attachment:
+        if not run_id:
+            raise ValueError("local_attachment requires an explicit canonical run_id")
+        metadata.update({
+            "attachment_mode":"local_working_copy",
+            "canonical_run_id":str(run_id),
+            "server_persistence":False,
+            "authority_note":"Locally managed telemetry associated by the user with an authoritative NHRA Tech Services Run; not uploaded to Tech Services.",
+        })
     run_id,asset_id,session_id=catalog.register_telemetry_file(
-        path, vendor=run.vendor, display_name=run.name, channel_summary=channel_summary(run),
-        metadata={
-            "application_version": PRODUCT_VERSION,
-            "import_decoder": run.metadata.get("import_decoder", ""),
-            "import_probe_reason": run.metadata.get("import_probe_reason", ""),
-            "data_warnings": list(run.metadata.get("data_warnings", []) or []),
-            "source_name": run.name,
-        },
+        path, run_id=run_id, vendor=run.vendor, display_name=run.name, channel_summary=channel_summary(run),
+        metadata=metadata,
         managed=managed, time_offset_s=offset, time_method=method,
     )
+    # Logger/session metadata may enrich a local record, but an existing official
+    # timing/weather value is protected by set_run_conditions().
     sync_run_state(catalog,run_id,run)
-    run.metadata["catalog_run_id"]=run_id
+    apply_catalog_run_authority(catalog,run_id,run)
     run.metadata["catalog_asset_id"]=asset_id
     run.metadata["catalog_telemetry_session_id"]=session_id
     return run_id,asset_id,session_id

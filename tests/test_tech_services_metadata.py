@@ -46,6 +46,7 @@ def test_read_only_site_metadata_sync_is_idempotent_and_does_not_infer_entry_run
     assert run["entry_id"] in (None, "")
     assert run["driver_name"] == "Gaige Herrera"
     assert run["timing"]["quarter_mile_s"] == 6.72
+    assert run["timing"]["three_thirty_ft_s"] == 2.85
     assert run["source"]["entry_link_status"] == "server_not_exposed"
 
     second=sync_tech_services_season(catalog,FakeClient(),2026)

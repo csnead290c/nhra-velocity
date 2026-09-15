@@ -75,7 +75,7 @@ from runlab.sensor_health import sensor_health
 from runlab.comparison_report import comparison_summary
 from runlab.derived import attach_delivered_power_reconstruction
 from runlab.catalog import LocalCatalog
-from runlab.catalog_bridge import sync_run_state, capture_model_snapshot
+from runlab.catalog_bridge import sync_run_state, capture_model_snapshot, register_opened_telemetry, apply_catalog_run_authority
 from runlab.sync_contract import run_sync_payload
 from runlab.trends import compare_seasons
 from runlab.transport import UnboundTechServicesTransport, AuthorizedTechServicesTransport
@@ -245,6 +245,7 @@ class RunBrowser(QtWidgets.QWidget):
     keepOfflineRequested = QtCore.Signal(str)
     keepEventOfflineRequested = QtCore.Signal(str)
     analysisCaseRequested = QtCore.Signal(str)
+    attachTelemetryRequested = QtCore.Signal(str)
     runSelectionChanged = QtCore.Signal(str)
 
     def __init__(self, catalog: LocalCatalog):
@@ -254,14 +255,14 @@ class RunBrowser(QtWidgets.QWidget):
         self.tree=QtWidgets.QTreeWidget();self.tree.setHeaderLabels(['Run / Event','Driver','Class','Round','ET','MPH','Assets','Cached'])
         self.tree.setColumnWidth(0,235);self.tree.setColumnWidth(1,135);self.tree.setColumnWidth(2,120);self.tree.setColumnWidth(3,65);self.tree.setColumnWidth(4,62);self.tree.setColumnWidth(5,68);self.tree.setColumnWidth(6,55);self.tree.setColumnWidth(7,55)
         self.tree.setAlternatingRowColors(True);self.tree.itemDoubleClicked.connect(self._double);self.tree.currentItemChanged.connect(self._selection_changed);lay.addWidget(self.tree,1)
-        row=QtWidgets.QHBoxLayout();self.open_btn=QtWidgets.QPushButton('Open Run');self.offline_btn=QtWidgets.QPushButton('Cache Offline');self.incident_btn=QtWidgets.QPushButton('New Analysis Case');self.refresh_btn=QtWidgets.QPushButton('Refresh')
-        for b in (self.open_btn,self.offline_btn,self.incident_btn):row.addWidget(b)
+        row=QtWidgets.QHBoxLayout();self.open_btn=QtWidgets.QPushButton('Open Run');self.attach_btn=QtWidgets.QPushButton('Attach Local Telemetry…');self.offline_btn=QtWidgets.QPushButton('Cache Offline');self.incident_btn=QtWidgets.QPushButton('New Analysis Case');self.refresh_btn=QtWidgets.QPushButton('Refresh')
+        for b in (self.open_btn,self.attach_btn,self.offline_btn,self.incident_btn):row.addWidget(b)
         row.addStretch(1);row.addWidget(self.refresh_btn);lay.addLayout(row)
-        note=QtWidgets.QLabel('Run and file relationships come from NHRA Tech Services. Add files on the website; this app mirrors and caches them for analysis.')
+        note=QtWidgets.QLabel('Select an authoritative NHRA Tech Services Run, then attach telemetry manually for analysis. Local attachments are stored in Velocity and never uploaded or matched by filename; future server Asset support can replace this local bridge without changing Run identity.')
         note.setWordWrap(True);note.setStyleSheet('color:#aeb4bb;padding:2px');lay.addWidget(note)
         self.summary=QtWidgets.QLabel();self.summary.setStyleSheet('color:#aeb4bb;padding:2px');lay.addWidget(self.summary)
         self.search.textChanged.connect(lambda _t:self.refresh());self.refresh_btn.clicked.connect(self.refresh)
-        self.open_btn.clicked.connect(lambda:self._emit(self.openRunRequested));self.offline_btn.clicked.connect(self._offline);self.incident_btn.clicked.connect(lambda:self._emit(self.analysisCaseRequested))
+        self.open_btn.clicked.connect(lambda:self._emit(self.openRunRequested));self.attach_btn.clicked.connect(lambda:self._emit(self.attachTelemetryRequested));self.offline_btn.clicked.connect(self._offline);self.incident_btn.clicked.connect(lambda:self._emit(self.analysisCaseRequested))
         self.refresh()
 
     def selected_run_id(self) -> str:
@@ -762,7 +763,13 @@ class AssetBrowser(QtWidgets.QWidget):
         assets=self.catalog.list_assets(self.run_id);self.table.setRowCount(len(assets))
         for r,a in enumerate(assets):
             mapping=self.catalog.get_time_mapping(a['id']) or {}
-            vals=[a.get('asset_type',''),a.get('filename',''),('Tech Services' if a.get('source_kind')=='tech_services' else 'Local development'),('cached' if self.catalog.asset_cache_valid(str(a['id'])) else 'remote'),a.get('vendor',''),a.get('remote_id',''),mapping.get('offset_s',''),mapping.get('scale',''),mapping.get('method','')]
+            meta=a.get('metadata') or {}
+            authority='Tech Services' if a.get('source_kind')=='tech_services' else ('Local working attachment' if meta.get('attachment_mode')=='local_working_copy' else 'Local scratch/development')
+            if a.get('source_kind')=='tech_services':
+                cache_state='cached' if self.catalog.asset_cache_valid(str(a['id'])) else 'remote'
+            else:
+                cache_state='managed local' if a.get('storage_mode')=='managed' and self.catalog.asset_cache_valid(str(a['id'])) else ('external local' if a.get('local_path') else 'missing')
+            vals=[a.get('asset_type',''),a.get('filename',''),authority,cache_state,a.get('vendor',''),a.get('remote_id',''),mapping.get('offset_s',''),mapping.get('scale',''),mapping.get('method','')]
             for c,v in enumerate(vals):
                 item=QtWidgets.QTableWidgetItem(str(v if v is not None else ''))
                 if c==0:item.setData(QtCore.Qt.UserRole,str(a['id']))
@@ -3174,9 +3181,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.auth_provider=WebsiteTechServicesAuthProvider()
         self.auth=AuthManager(self.auth_provider,KeyringCredentialStore())
         self.auth_required=desktop_auth_required()
-        # Canonical Run→Asset transport remains fail-closed until the website
-        # exposes that permanent asset contract. Metadata/timing sync uses the
-        # existing protected GET APIs through self.auth_provider instead.
+        # Permanent server Run→Asset transport remains fail-closed until the
+        # website exposes that contract. Metadata/timing sync uses existing GET
+        # APIs; explicit local working attachments stay in Velocity only.
         self.tech_services=AuthorizedTechServicesTransport(UnboundTechServicesTransport(),self.auth,enforce=self.auth_required)
         self.simulation_studies=[]
         self.compare_sets=CompareSetLibrary()
@@ -3213,6 +3220,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.a_history=QtGui.QAction('Engineering History…',self); self.a_history.triggered.connect(self._engineering_history)
         self.a_apply_sync=QtGui.QAction('Apply Tech Services Snapshot (Development)…',self); self.a_apply_sync.triggered.connect(self._apply_sync_snapshot)
         self.a_site_sync=QtGui.QAction('Sync NHRA Tech Services Data…',self); self.a_site_sync.triggered.connect(self._sync_tech_services_data)
+        self.a_attach_selected_run=QtGui.QAction('Attach Local Telemetry to Selected Run…',self); self.a_attach_selected_run.triggered.connect(self._attach_local_telemetry_to_selected_run)
         self.a_recovery=QtGui.QAction('Recover Autosave…',self); self.a_recovery.triggered.connect(lambda:self._recover_snapshot(force=True))
         self.a_sheet=QtGui.QAction('New Worksheet',self); self.a_sheet.setShortcut('Ctrl+Shift+N'); self.a_sheet.triggered.connect(lambda:self.add_worksheet())
         self.a_duplicate_sheet=QtGui.QAction('Duplicate Worksheet',self); self.a_duplicate_sheet.setShortcut('Ctrl+Shift+D'); self.a_duplicate_sheet.triggered.connect(self._duplicate_current_sheet)
@@ -3301,6 +3309,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.run_browser.keepOfflineRequested.connect(self._keep_run_offline)
         self.run_browser.keepEventOfflineRequested.connect(self._keep_event_offline)
         self.run_browser.analysisCaseRequested.connect(self._create_analysis_case)
+        self.run_browser.attachTelemetryRequested.connect(self._attach_local_telemetry_to_run)
         run_dock=QtWidgets.QDockWidget('NHRA Tech Services Runs',self); run_dock.setObjectName('RunBrowserDock'); run_dock.setWidget(self.run_browser); self.addDockWidget(QtCore.Qt.LeftDockWidgetArea,run_dock)
         self.case_browser=AnalysisCaseBrowser(self.catalog);self.case_browser.openRunRequested.connect(self._open_catalog_run);self.case_browser.addSelectedRunRequested.connect(self._add_selected_run_to_case);self.case_browser.cacheCaseRequested.connect(self._cache_analysis_case)
         case_dock=QtWidgets.QDockWidget('Analysis Cases',self);case_dock.setObjectName('AnalysisCasesDock');case_dock.setWidget(self.case_browser);self.addDockWidget(QtCore.Qt.LeftDockWidgetArea,case_dock);self.tabifyDockWidget(run_dock,case_dock);run_dock.raise_()
@@ -3369,7 +3378,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for preset in QUICK_GRAPH_PRESETS:
             qg.addAction(preset, lambda checked=False, name=preset: self._apply_quick_graph(name))
         add=m.addMenu('Add Display'); add.addAction(self.a_wave); add.addAction(self.a_values); add.addAction(self.a_gauge); add.addAction(self.a_region_stats); add.addAction(self.a_scatter); add.addAction(self.a_hist); add.addAction(self.a_spectrum); add.addAction(self.a_load_map); add.addAction(self.a_metric_report); add.addAction(self.a_saved_report); add.addAction(self.a_saved_trend); add.addAction(self.a_strip_model); add.addAction(self.a_envelope); add.addAction(self.a_delta); add.addAction(self.a_comparison_summary); add.addAction(self.a_events); add.addAction(self.a_alarm_status); add.addAction(self.a_notepad); add.addAction(self.a_audit); add.addAction(self.a_sensor_health); add.addAction(self.a_knowledge)
-        m=self.menuBar().addMenu('&Data'); m.addAction('Run Details / Setup…',lambda:self.metadata.setFocus()); m.addAction(self.a_math); m.addAction(self.a_gate); libm=m.addMenu('Analysis Definition Library'); [libm.addAction(a) for a in (self.a_library_import,self.a_library_export,self.a_library_capture,self.a_library_constant,self.a_library_metric,self.a_library_segment,self.a_library_condition,self.a_library_event_rule,self.a_library_report)]; m.addSeparator(); m.addAction(self.a_site_sync); m.addAction(self.a_keep_offline); m.addAction(self.a_capture_snapshot); m.addAction(self.a_history); m.addSeparator(); m.addAction(self.a_apply_sync)
+        m=self.menuBar().addMenu('&Data'); m.addAction('Run Details / Setup…',lambda:self.metadata.setFocus()); m.addAction(self.a_math); m.addAction(self.a_gate); libm=m.addMenu('Analysis Definition Library'); [libm.addAction(a) for a in (self.a_library_import,self.a_library_export,self.a_library_capture,self.a_library_constant,self.a_library_metric,self.a_library_segment,self.a_library_condition,self.a_library_event_rule,self.a_library_report)]; m.addSeparator(); m.addAction(self.a_site_sync); m.addAction(self.a_attach_selected_run); m.addAction(self.a_keep_offline); m.addAction(self.a_capture_snapshot); m.addAction(self.a_history); m.addSeparator(); m.addAction(self.a_apply_sync)
         m.addAction('Data Integrity Audit…',self._show_audit); m.addAction(self.a_sensor_health)
         m=self.menuBar().addMenu('&Analysis')
         m.addAction(self.a_shift_report); m.addSeparator(); m.addAction(self.a_spectrum); m.addAction(self.a_load_map); m.addAction(self.a_metric_report); m.addAction(self.a_saved_report); m.addAction(self.a_saved_trend); m.addAction(self.a_strip_model); m.addAction(self.a_envelope); m.addAction(self.a_comparison_summary); m.addSeparator()
@@ -3410,7 +3419,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ('Add FFT / PSD Spectrum',lambda:self.current_sheet().add_spectrum()),('Add Load / Heat Map',lambda:self.current_sheet().add_load_map()),('Add Segment / KPI Report',lambda:self.current_sheet().add_metric_report()),('Add NHRA Strip / Model Residuals',lambda:self.current_sheet().add_strip_model()),('Add Multi-Run Envelope',lambda:self.current_sheet().add_envelope()),
             ('Add Reference Delta',lambda:self.current_sheet().add_delta()),('Add Run Comparison Summary',lambda:self.current_sheet().add_comparison_summary()),('Add Alarm Status',lambda:self.current_sheet().add_alarm_status()),('Add A-B Region Statistics',lambda:self.current_sheet().add_region_stats()),('Add Sensor Health',lambda:self.current_sheet().add_sensor_health()),
             ('Pro Stock Shift Report…',self._pro_stock_shift_report),('Calculated Channel…',self._new_math_channel),('Data Gate…',self._new_data_gate),('Reconstruct Delivered Power…',self._reconstruct_power),
-            ('Inference Center…',self._inference_center),('Create Compare Run…',self._create_compare_run),('Save Current Compare Set…',self._save_current_compare_set),('Apply Named Compare Set…',self._apply_named_compare_set),('Next Reference Run',lambda:self._step_compare_reference(1)),('Previous Reference Run',lambda:self._step_compare_reference(-1)),('Simulation Study Center…',self._simulation_study_center),('Capture Vehicle Model Snapshot…',self._capture_model_snapshot),('Engineering History…',self._engineering_history),('Sync NHRA Tech Services Data…',self._sync_tech_services_data),('Keep Active Asset Offline',self._keep_active_offline),
+            ('Inference Center…',self._inference_center),('Create Compare Run…',self._create_compare_run),('Save Current Compare Set…',self._save_current_compare_set),('Apply Named Compare Set…',self._apply_named_compare_set),('Next Reference Run',lambda:self._step_compare_reference(1)),('Previous Reference Run',lambda:self._step_compare_reference(-1)),('Simulation Study Center…',self._simulation_study_center),('Capture Vehicle Model Snapshot…',self._capture_model_snapshot),('Engineering History…',self._engineering_history),('Sync NHRA Tech Services Data…',self._sync_tech_services_data),('Attach Local Telemetry to Selected Run…',self._attach_local_telemetry_to_selected_run),('Keep Active Asset Offline',self._keep_active_offline),
             ('Run Import / Plot Data Self-Test…',self._run_data_selftest),('Open Diagnostic Log Folder',self._open_log_folder),
         ]
         labels=[x[0] for x in commands]
@@ -3798,7 +3807,7 @@ class MainWindow(QtWidgets.QMainWindow):
             f"✓ Current account status: {'signed in' if status.signed_in else 'signed out'}.<br><br>"
             '<b>Still intentionally fail-closed:</b><br>'
             '• parity.php does not expose its event_entry_id bridge, so Velocity does not guess Entry→Run ownership;<br>'
-            '• the site does not yet expose a permanent Run→Asset manifest/download API, so telemetry files stay local/manual for now;<br>'
+            '• the site does not yet expose a permanent Run→Asset manifest/download API; Velocity therefore supports an explicit local working attachment to a selected authoritative Run, stored in the local object store and never uploaded automatically;<br>'
             '• Velocity performs no Tech Services data writes through this integration.<br><br>'
             'In other words: we can share identity, event/entry metadata and official timing today without changing the website repository.'
         )
@@ -4376,6 +4385,69 @@ class MainWindow(QtWidgets.QMainWindow):
         nh=self.store.add(outpath,scenario.run);nh.role='reference';nh.display_name=scenario.run.name
         self.store.changed.emit();self.statusBar().showMessage(f'Generated scratch compare session: {scenario.run.name}',7000)
 
+    def _attach_local_telemetry_to_selected_run(self):
+        run_id=self.run_browser.selected_run_id() if hasattr(self,'run_browser') else ''
+        if not run_id:
+            QtWidgets.QMessageBox.information(self,'Attach Local Telemetry','Select an authoritative Run in the NHRA Tech Services Runs browser first.')
+            return
+        self._attach_local_telemetry_to_run(run_id)
+
+    def _attach_local_telemetry_to_run(self, run_id: str):
+        """Explicitly associate local telemetry with one authoritative Run.
+
+        This is a local workstation bridge only. It intentionally performs no
+        Tech Services write and never chooses a Run from a filename. The user
+        must select the canonical Run first.
+        """
+        record=self.catalog.get_run(run_id)
+        if record is None:
+            QtWidgets.QMessageBox.warning(self,'Attach Local Telemetry',f'Run {run_id} was not found in the local catalog.')
+            return
+        files,_=QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            f"Attach telemetry — {record.get('driver_name') or ''} {record.get('round') or ''}".strip(),
+            '',
+            'Supported telemetry (*.ld *.rpk *.ddf *.csv *.tsv *.txt *.log *.maxxlog *.MaxxECU-log *.ftlog *.ftml *.zip *.bin *.vbo *.msl *.mlg *.xlsx *.xlsm *.dl *.dlz *.bigTune *.big);;All files (*.*)'
+        )
+        files=[str(Path(x)) for x in files if x and Path(x).is_file()]
+        if not files:return
+        opened=0;existing_count=0;errors=[]
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            for path in files:
+                try:
+                    run=load_telemetry(path)
+                    _rid,asset_id,session_id=register_opened_telemetry(
+                        self.catalog,path,run,run_id=run_id,managed=True,local_attachment=True
+                    )
+                    asset=self.catalog.get_asset(asset_id) or {}
+                    stored_path=str(asset.get('local_path') or path)
+                    already=next((h for h in self.store.runs if str(h.catalog_asset_id or '')==str(asset_id)),None)
+                    if already is not None:
+                        existing_count+=1
+                        try:self.store.set_active(self.store.runs.index(already))
+                        except ValueError:pass
+                        continue
+                    h=self.store.add(stored_path,run,activate=(opened==0))
+                    h.catalog_run_id=run_id;h.catalog_asset_id=asset_id;h.catalog_session_id=session_id
+                    h.display_name=str(asset.get('filename') or Path(path).stem)
+                    opened+=1
+                except Exception as exc:
+                    logging.exception('Could not attach telemetry %s to catalog run %s',path,run_id)
+                    errors.append(f'{Path(path).name}: {exc}')
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        self.run_browser.refresh();self.asset_browser.set_run(run_id);self.catalog_run_details.set_run(run_id)
+        if opened or existing_count:
+            timing=record.get('timing') or {}
+            inherited=[]
+            if timing:inherited.append('official timing')
+            if record.get('weather'):inherited.append('official weather')
+            context=', '.join(inherited) if inherited else 'canonical Run identity'
+            self.statusBar().showMessage(f'Attached {opened} local telemetry file(s) to selected Run; inherited {context}.',8000)
+        if errors:
+            QtWidgets.QMessageBox.warning(self,'Attach Local Telemetry','Some files could not be attached:\n\n'+'\n'.join(errors))
+
     def _open_catalog_run(self, run_id: str):
         record=self.catalog.get_run(run_id)
         if record is None:
@@ -4393,9 +4465,8 @@ class MainWindow(QtWidgets.QMainWindow):
                         path=ensure_asset_cached(self.catalog,self.tech_services,str(asset['id']))
                     run=load_telemetry(path)
                     session_id=self.catalog.ensure_telemetry_session(str(asset['id']),display_name=str(asset.get('filename') or Path(path).stem),vendor=run.vendor,channel_summary={'channels':len(run.data.columns),'canonical_roles':sorted(run.channel_map.keys())})
-                    if record.get('weather'):run.environment=Environment.from_dict(record['weather'])
-                    if record.get('timing'):run.timing=TimingData.from_dict(record['timing'])
-                    run.metadata['catalog_run_id']=run_id;run.metadata['catalog_asset_id']=asset['id']
+                    apply_catalog_run_authority(self.catalog,run_id,run)
+                    run.metadata['catalog_asset_id']=asset['id'];run.metadata['catalog_telemetry_session_id']=session_id
                     h=self.store.add(path,run,activate=(opened==0));h.catalog_run_id=run_id;h.catalog_asset_id=str(asset['id']);h.catalog_session_id=session_id;h.display_name=str(asset.get('filename') or Path(path).stem)
                     opened+=1
                 except Exception as exc:
@@ -4443,11 +4514,11 @@ class MainWindow(QtWidgets.QMainWindow):
         h=self.store.active
         if not h:return
         if not h.catalog_asset_id:
-            QtWidgets.QMessageBox.information(self,'Cache Offline','This is a scratch/local session, not a Tech Services Run asset. Permanent run files are added on nhratechservices.com and then pulled into the app.');return
+            QtWidgets.QMessageBox.information(self,'Cache Offline','This is a scratch session with no catalog attachment. Attach it manually to an authoritative Run first, or open a mirrored Tech Services asset.');return
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
             path=ensure_asset_cached(self.catalog,self.tech_services,h.catalog_asset_id);h.path=path
-            self.run_browser.refresh();self.asset_browser.refresh();self.statusBar().showMessage('Active Tech Services asset is cached locally and SHA-256 verified.',7000)
+            asset=self.catalog.get_asset(h.catalog_asset_id) or {};label='Tech Services asset' if asset.get('source_kind')=='tech_services' else 'local Run attachment';self.run_browser.refresh();self.asset_browser.refresh();self.statusBar().showMessage(f'Active {label} is stored locally and SHA-256 verified.',7000)
         except Exception as exc:
             logging.exception('Keep offline failed');QtWidgets.QMessageBox.critical(self,'Cache Offline',str(exc))
         finally:QtWidgets.QApplication.restoreOverrideCursor()
@@ -4642,6 +4713,9 @@ class MainWindow(QtWidgets.QMainWindow):
             '  • MaxxECU .maxxlog / .MaxxECU-log — native text log; supported zip packages are also decoded.\n\n'
             'Delimited:\n'
             '  • CSV / TSV / TXT / LOG exports.\n\n'
+            'Authoritative Run workflow:\n'
+            '  • Sync Tech Services Events/Runs, select the exact Run, then use Attach Local Telemetry… to bind local evidence explicitly.\n'
+            '  • Attachments are copied into Velocity managed storage, inherit official timing/weather when available, and are never uploaded or matched by filename.\n\n'
             'Recognized but intentionally not decoded yet:\n'
             '  • FuelTech .ftlog / .ftml — use CSV or MoTeC .ld export until a native decoder is validated.\n\n'
             'Import rules:\n'

@@ -43,7 +43,7 @@ def _timing(row: Mapping[str, Any]) -> dict[str, Any]:
     aliases = {
         "rt": "reaction_time_s",
         "ft60": "sixty_foot_s",
-        "ft330": "330_ft_s",
+        "ft330": "three_thirty_ft_s",
         "ft660": "eighth_mile_s",
         "mph660": "eighth_mile_mph",
         "ft1000": "1000_ft_s",

@@ -91,18 +91,20 @@ When a server Asset is requested:
 
 Deleting a cache entry must never delete or change the permanent server Asset.
 
-## 6. Scratch/local sessions
+## 6. Scratch sessions and explicit local working attachments
 
-Engineers can still open a local telemetry file directly for quick analysis. That session is **scratch state**.
+Engineers can still open a local telemetry file directly for quick analysis. That session is **scratch state**. Direct **Open Log…** does not create an official Run, attach the file to a Run, upload it, or infer ownership.
 
-Opening a local file does not:
+When an authoritative Tech Services Run has already been synchronized, the engineer may instead select that exact Run and invoke **Attach Local Telemetry…**. That explicit action:
 
-- create an official Run;
-- attach the file to an existing Run;
-- upload it to Tech Services;
-- infer which Run it belongs to.
+- requires a user-selected canonical Run ID;
+- never derives Run identity from filename, driver, car number, timestamps, or folder structure;
+- copies the bytes into Velocity's local content-addressed object store;
+- creates a local working Asset association to the selected Run so the workstation can persist analysis/time mappings;
+- inherits official timing/weather from the canonical Run without overwriting them from logger metadata;
+- performs **no Tech Services write** and does not claim the local association is a permanent server Asset.
 
-If the file needs to become part of permanent run history, it is added to the Run through Tech Services. The next catalog sync then exposes it to the desktop as a server Asset.
+This is a bridge for the current read-only website contract. If the file needs to become part of permanent run history, Tech Services remains the system of record. When a verified server Run→Asset endpoint exists, server Asset identity can replace the local working association without changing the canonical Run identity.
 
 ## 7. Tech Services contract v4
 

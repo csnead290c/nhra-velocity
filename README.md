@@ -116,7 +116,9 @@ There is no Box connection, repository-manifest workflow, file-to-run matcher, o
 
 ## Current Tech Services integration status
 
-The local schema and authorization boundary are ready, and the current development build binds the source-verified website login plus protected read APIs without changing the Tech Services repository. Velocity can mirror Tech Master Events, Event Entries, and official normalized parity timing Runs into its local catalog. The audited site still does not expose the parity Run's `event_entry_id` bridge or a permanent Run → Asset manifest/download endpoint, so those relationships remain fail-closed. The app does not reinterpret the site's simulation `run_history`, guess object URLs, infer Run ownership from driver/car/file names, or write application data back to the website.
+The local schema and authorization boundary are ready, and the current development build binds the source-verified website login plus protected read APIs without changing the Tech Services repository. Velocity can mirror Tech Master Events, Event Entries, and official normalized parity timing Runs into its local catalog. The audited site still does not expose the parity Run's `event_entry_id` bridge or a permanent Run → Asset manifest/download endpoint, so those server relationships remain fail-closed. The app does not reinterpret the site's simulation `run_history`, guess object URLs, infer Run ownership from driver/car/file names, or write application data back to the website.
+
+As a temporary workstation bridge, a user can select an already-synchronized authoritative Run and choose **Attach Local Telemetry…**. Velocity copies that explicitly chosen file into managed local storage, associates it with the selected Run only in the local catalog, and hydrates the session with official timing/weather. This is deliberately labeled **Local working attachment** and is not presented as a permanent Tech Services Asset.
 
 For development only, **Data → Apply Tech Services Snapshot (Development)…** accepts contract-v4 JSON containing Events, nested Runs, and nested permanent Assets. This exercises the exact local mirror/cache semantics without pretending that the final network API is known.
 
@@ -124,7 +126,7 @@ See `ARCHITECTURE.md`, `DATA_MODEL.md`, `ANALYSIS_CASES.md`, and `SYNC_CONTRACT_
 
 ## Desktop workflow
 
-- **NHRA Tech Services Runs** lists only mirrored server Runs.
+- **NHRA Tech Services Runs** lists only mirrored server Runs and provides **Attach Local Telemetry…** for explicit Run-first local evidence association.
 - **Analysis Cases** lists local engineering workspaces and their primary/baseline/comparison/reference Runs.
 - **New Analysis Case** creates an Incident, Performance / Reconstruction, Parity, Development, Aerodynamics, or General Engineering workspace from a selected Run.
 - A selected authoritative Run can be added to an existing case without altering the Run or any Asset ownership.
@@ -132,8 +134,8 @@ See `ARCHITECTURE.md`, `DATA_MODEL.md`, `ANALYSIS_CASES.md`, and `SYNC_CONTRACT_
 - **Case Timeline / Sync** shows each Run→Case and Asset→Run mapping, supports manual synchronization anchors, and displays source-aware case markers.
 - **Synchronized Case Review** adds one movable Case-time cursor, marker/frame stepping, 0.25×–2× review playback, source-position readout, Qt video/audio seeking for cached media, and a synchronized case-time preview/readout for telemetry/IDR-compatible numeric files.
 - Double-click/Open Run loads every telemetry Asset attached to that Run.
-- **Run Assets** shows server authority, remote Asset ID, cache state, vendor, and time mapping.
-- Direct **Open Log…** remains available for ad-hoc/scratch analysis, but opening a random local file does not create a permanent catalog Run or attach it to a Tech Services Run.
+- **Run Assets** distinguishes permanent **Tech Services** Assets from **Local working attachments**, and shows cache/storage state, vendor, remote ID where applicable, and time mapping.
+- Direct **Open Log…** remains available for ad-hoc/scratch analysis and never assigns Run ownership. Only the explicit Run-first **Attach Local Telemetry…** action creates a local working association, and it does not upload or create a permanent server Asset.
 - Run-scoped and case-scoped ModelSnapshots remain supported for single-pass and multi-run inverse fitting.
 - **Simulation Study Center** performs repeatable multi-axis RSA/Quarter Pro sweeps and can add selected simulated cases directly to Compare Sessions.
 - **Account** signs in with the existing Tech Services account, securely caches only the Bearer token in the OS credential vault, and surfaces the live server capability/entitlement state.
