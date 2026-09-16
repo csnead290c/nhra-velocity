@@ -1,7 +1,11 @@
-# NHRA Velocity — Development v0.38
+# NHRA Velocity — Development v0.38 (dev.14 reliability gate)
 
 NHRA Velocity is a native desktop engineering workstation for NHRA telemetry, vehicle-performance analysis, synchronized evidence, and future incident reconstruction.
 
+
+## dev.14 reliability gate
+
+The current development line adds a formal product audit and makes packaged Windows startup a CI gate. Both the frozen PyInstaller executable and the silently installed Inno Setup build run a network-free Qt/pyqtgraph smoke scenario before artifacts are accepted. The installer version now uses the same `NHRA_VELOCITY_VERSION` environment variable emitted by the workflows. See `PRODUCT_AUDIT_v0_38.md` for the current-state scorecard and phased path to 1.0.
 
 ## v0.38 long-term application foundation + NHRA-specific workflows
 

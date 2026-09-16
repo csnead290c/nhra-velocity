@@ -1,10 +1,10 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.13**
+Validated build: **0.38.0-dev.14**
 
 ## Scope
 
-This validation covers the dev.12 live cursor/readout, managed Run-data reopen, and current/latest-completed event-selection fixes on top of the dev.11 ATLAS-style waveform interaction and workbook-shell usability pass, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
+This validation covers the dev.14 packaged-Windows reliability gate and product audit on top of the dev.13.1 startup hardening, dev.13 analysis/statistics consistency work, durable Run-data reopen, ATLAS-style waveform interaction, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
 
 ## Results
 
@@ -64,3 +64,10 @@ No source evidence, official NHRA timing, canonical weather, or Tech Services Ru
 ## dev.12 persistence root cause
 
 The earlier persistence regression only proved that the Run→Asset row and managed SHA-256 object survived a catalog reopen. It did not prove that the managed bytes could be decoded again. The object store uses extensionless hash filenames by design; native decoder routing is deliberately extension-aware/fail-closed. dev.12 adds filename-preserving aliases for read/decode while keeping the underlying content-addressed object authoritative and hash-verifiable.
+
+## dev.14 reliability-gate validation
+
+- Source regression includes release-pipeline contract checks for the packaged desktop smoke path, installer version plumbing, and workflow gates.
+- Windows development and tagged-release workflows now validate both the frozen and installed desktop with `--smoke-test`; these are intended to catch startup/Qt/PyInstaller regressions that source-only tests cannot detect.
+- The packaged smoke scenario exercises MainWindow construction, pyqtgraph rendering, live/reference cursor statistics, and representative Analysis displays without network access.
+- A broader Qt-only test constructs the normal daily Analysis display set with realistic main/reference sessions; it runs on Windows build agents where PySide6 is installed.

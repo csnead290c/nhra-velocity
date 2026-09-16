@@ -23,10 +23,34 @@ jobs:
           "NHRA_VELOCITY_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - shell: cmd
         run: build_windows_exe.bat
+      - name: Smoke frozen desktop
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:NHRA_TECH_DEV_UNAUTHENTICATED = "1"
+          $env:NHRA_VELOCITY_HOME = Join-Path $env:RUNNER_TEMP "velocity-smoke-frozen"
+          $exe = Resolve-Path "dist\NHRA-Velocity\NHRA-Velocity.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--smoke-test" -PassThru
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw "Frozen desktop smoke test timed out" }
+          if ($p.ExitCode -ne 0) { throw "Frozen desktop smoke test failed with exit code $($p.ExitCode)" }
       - shell: pwsh
         run: choco install innosetup --no-progress -y
       - shell: pwsh
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\NHRA-Velocity.iss'
+      - name: Smoke installed desktop
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem installer\Output\NHRA-Velocity-Setup-*.exe | Select-Object -First 1
+          $install = Start-Process -FilePath $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/TASKS=""' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Silent installer failed with exit code $($install.ExitCode)" }
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:NHRA_TECH_DEV_UNAUTHENTICATED = "1"
+          $env:NHRA_VELOCITY_HOME = Join-Path $env:RUNNER_TEMP "velocity-smoke-installed"
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\NHRA Velocity\NHRA-Velocity.exe"
+          if (-not (Test-Path $exe)) { throw "Installed executable not found at $exe" }
+          $p = Start-Process -FilePath $exe -ArgumentList "--smoke-test" -PassThru
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw "Installed desktop smoke test timed out" }
+          if ($p.ExitCode -ne 0) { throw "Installed desktop smoke test failed with exit code $($p.ExitCode)" }
       - uses: actions/upload-artifact@v4
         with:
           name: NHRA-Velocity-${{ env.NHRA_VELOCITY_VERSION }}-${{ github.sha }}

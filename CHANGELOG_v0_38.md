@@ -128,3 +128,11 @@
 - Wraps main-window construction and authentication startup in durable logging/error reporting.
 - The Windows dev launcher is replaced by a hidden, blocking WSH/CMD handoff so the application process is not orphaned by a short-lived terminal launcher.
 - Normal desktop launch remains console-free while launch/update diagnostics are written to the Velocity local app-data folder.
+
+## v0.38.0-dev.14 — reliability gate and product audit
+
+- Added `PRODUCT_AUDIT_v0_38.md` with a current-state scorecard, immediate product rules, phased execution plan, and explicit 1.0 acceptance test.
+- Added `--smoke-test` to the actual desktop entry point. The smoke path is network-free, bypasses account prompts only for the test process, constructs the real MainWindow, renders a representative waveform, enables reference/statistics, and constructs common analysis displays.
+- Windows development and release workflows now smoke-test both the frozen PyInstaller executable and the silently installed Inno Setup application. A packaged Qt startup failure now blocks the artifact/release.
+- Fixed the Inno Setup version variable mismatch: installer metadata now consumes `NHRA_VELOCITY_VERSION`, the same variable emitted by CI/release workflows.
+- Expanded Windows Qt smoke coverage so ordinary Analysis displays are constructed/refreshed with realistic main/reference sessions.

@@ -6117,10 +6117,58 @@ def _style(app):
 _FAULT_LOG_HANDLE = None
 
 
+def _desktop_smoke_requested() -> bool:
+    return '--smoke-test' in sys.argv or os.environ.get('NHRA_VELOCITY_SMOKE_TEST','').strip() == '1'
+
+
+def _run_desktop_smoke_scenario(win, app) -> None:
+    """Exercise the packaged Qt/runtime path without external data or network.
+
+    This intentionally lives in the desktop entry point so the PyInstaller and
+    installed-executable smoke gate validates the same imports, MainWindow,
+    pyqtgraph rendering and common analysis widgets that normal users run.
+    """
+    t=np.arange(0.0, 3.01, 0.01)
+    speed=np.maximum(0.0,(t-0.35)*70.0)
+    throttle=np.where((t>=0.15)&(t<2.8),100.0,0.0)
+    rpm=np.where(t<0.35,5500.0,7200.0+speed*11.0)
+    driveshaft=speed*30.0
+    run=TelemetryRun(
+        name='packaged-smoke',
+        data=pd.DataFrame({'Time':t,'RPM':rpm,'Speed':speed,'Driveshaft':driveshaft,'Throttle':throttle}),
+        channel_map={'time_s':'Time','engine_rpm':'RPM','speed_mph':'Speed','driveshaft_rpm':'Driveshaft','throttle_pct':'Throttle'},
+        units={'Time':'s','RPM':'rpm','Speed':'mph','Driveshaft':'rpm','Throttle':'%'},
+        timing=TimingData(sixty_ft_s=1.05,three_thirty_ft_s=2.75,eighth_mile_s=4.20,quarter_mile_s=6.55),
+        environment=Environment(),
+    )
+    win.store.add('__velocity_smoke__.csv',run,activate=True)
+    sheet=win.current_sheet()
+    if sheet is None or not sheet.waveforms:
+        raise RuntimeError('Desktop smoke test could not create the default worksheet/waveform')
+    wave=sheet.waveforms[0]
+    wave.channels=['RPM','Speed','Throttle']
+    wave.refresh();app.processEvents()
+    if len(wave.plots) != 3:
+        raise RuntimeError(f'Desktop smoke test rendered {len(wave.plots)} waveform bands; expected 3')
+    win.cursors.x=1.25;win.cursors.a=0.55;wave.reference_visible=True
+    wave._set_readout_stat('show_stat_min',True);wave._set_readout_stat('show_stat_max',True);wave._refresh_readout();app.processEvents()
+    for factory in (sheet.add_region_stats,sheet.add_histogram,sheet.add_scatter,sheet.add_spectrum,sheet.add_sensor_health):
+        dock=factory();widget=dock.widget()
+        if hasattr(widget,'refresh'):widget.refresh()
+        app.processEvents()
+    logging.info('PACKAGED_DESKTOP_SMOKE_PASS version=%s plots=%s',PRODUCT_VERSION,len(wave.plots))
+
+
 def main():
     global _FAULT_LOG_HANDLE
     log_path=configure_logging()
     logging.info('Starting %s %s; log=%s', PRODUCT_NAME, PRODUCT_VERSION, log_path)
+    smoke_test=_desktop_smoke_requested()
+    if smoke_test:
+        # Packaged/CI smoke tests must be network-free and must not require a
+        # developer machine credential vault or Tech Services session.
+        os.environ['NHRA_TECH_DEV_UNAUTHENTICATED']='1'
+        logging.info('Packaged desktop smoke test requested')
     # Install native/Python crash capture before any Qt widget is constructed.
     # pythonw.exe has no console, so startup exceptions must never disappear.
     try:
@@ -6148,12 +6196,13 @@ def main():
     try:
         win=MainWindow()
         win_ref['win']=win
-        try:
-            win.auth.restore()
-        except Exception:
-            logging.exception('Could not restore secure Tech Services session')
+        if not smoke_test:
+            try:
+                win.auth.restore()
+            except Exception:
+                logging.exception('Could not restore secure Tech Services session')
         win._refresh_account_actions()
-        if win.auth_required:
+        if win.auth_required and not smoke_test:
             status=win.auth.status()
             if not (status.online_access_valid or status.offline_access_valid):
                 if not win._sign_in():
@@ -6162,10 +6211,18 @@ def main():
                         'Sign-in was not completed, so the application will remain closed.')
                     return 4
         win.show()
-        QtCore.QTimer.singleShot(250,win._maybe_start_initial_sync)
-        if len(sys.argv)>1:
-            paths=[p for p in sys.argv[1:] if Path(p).is_file()]
-            win._open_paths(paths)
+        if smoke_test:
+            try:
+                _run_desktop_smoke_scenario(win,app)
+            except Exception:
+                logging.exception('PACKAGED_DESKTOP_SMOKE_FAIL')
+                return 6
+            QtCore.QTimer.singleShot(150,app.quit)
+        else:
+            QtCore.QTimer.singleShot(250,win._maybe_start_initial_sync)
+            if len(sys.argv)>1:
+                paths=[p for p in sys.argv[1:] if p != '--smoke-test' and Path(p).is_file()]
+                win._open_paths(paths)
         return app.exec()
     except Exception:
         exc_type,exc_value,exc_tb=sys.exc_info()

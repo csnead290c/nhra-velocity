@@ -1,4 +1,6 @@
-# NHRA Tech Data — Long-Term Roadmap v0.33
+# NHRA Velocity — Long-Term Roadmap v0.38
+
+> **2026-09-16 product audit:** the immediate priority is the Reliability Gate in `PRODUCT_AUDIT_v0_38.md`. Breadth is now ahead of workflow cohesion; new isolated analysis windows should not outrank packaged-Windows reliability, Run/data persistence, compare/workbook ergonomics, or verified server contracts.
 
 ## Product invariant
 

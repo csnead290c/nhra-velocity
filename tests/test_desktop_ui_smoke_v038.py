@@ -129,3 +129,50 @@ def test_quick_analysis_displays_construct_and_refresh():
         app.processEvents()
     stats = docks[0].widget()
     assert stats.rowCount() == len(sheet.waveforms[0].channels)
+
+
+def test_all_daily_analysis_displays_construct_with_realistic_context():
+    app = _app()
+    store = SessionStore(); cursors = CursorBus()
+    main = _run("main-analysis")
+    ref = _run("reference-analysis")
+    h1 = store.add("main.csv", main, activate=True)
+    h2 = store.add("ref.csv", ref, activate=False)
+    h2.role = "reference"
+    sheet = Worksheet(store, cursors)
+    sheet.waveforms[0].channels = ["RPM", "Driveshaft", "Speed", "Throttle", "Long G"]
+    sheet.waveforms[0].refresh()
+    cursors.a = 0.6; cursors.x = 2.1
+
+    factories = [
+        sheet.add_values,
+        sheet.add_gauge,
+        sheet.add_region_stats,
+        sheet.add_scatter,
+        sheet.add_histogram,
+        sheet.add_spectrum,
+        sheet.add_load_map,
+        sheet.add_metric_report,
+        sheet.add_strip_model,
+        sheet.add_envelope,
+        sheet.add_delta,
+        sheet.add_audit,
+        sheet.add_sensor_health,
+        sheet.add_knowledge,
+        sheet.add_events,
+        sheet.add_alarm_status,
+        sheet.add_comparison_summary,
+        sheet.add_notepad,
+    ]
+    docks = []
+    for factory in factories:
+        dock = factory(); docks.append(dock)
+        widget = dock.widget()
+        if hasattr(widget, "refresh"):
+            widget.refresh()
+        app.processEvents()
+        assert dock is not None and widget is not None
+
+    # Construction should not mutate the authoritative source sessions.
+    assert store.active is h1
+    assert h2.role == "reference"

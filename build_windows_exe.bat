@@ -12,6 +12,7 @@ python -m PyInstaller --noconfirm --clean --windowed ^
   --add-data "ARCHITECTURE.md;." ^
   --add-data "DATA_MODEL.md;." ^
   --add-data "LONG_TERM_ROADMAP.md;." ^
+  --add-data "PRODUCT_AUDIT_v0_38.md;." ^
   desktop.py || exit /b 1
 echo.
 if defined NHRA_CODESIGN_CERT_SHA1 (

@@ -1,7 +1,7 @@
 #define MyAppName "NHRA Velocity"
 #define MyAppPublisher "NHRA"
 #define MyAppExeName "NHRA-Velocity.exe"
-#define MyAppVersion GetEnv("NHRA_TECH_VERSION")
+#define MyAppVersion GetEnv("NHRA_VELOCITY_VERSION")
 #if MyAppVersion == ""
   #define MyAppVersion "0.0.0-development"
 #endif
