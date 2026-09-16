@@ -9,6 +9,7 @@ parameters are application-level resources shared by all displays.
 """
 
 import json
+import html
 import os
 import sys
 import logging
@@ -305,14 +306,19 @@ class RunBrowser(QtWidgets.QWidget):
         self.event_scope=QtWidgets.QComboBox();self.event_scope.addItem('Latest event','latest');self.event_scope.addItem('All events','all');self.event_scope.setToolTip('Latest event keeps the trackside list compact. Searching automatically spans all synchronized events.')
         filter_row.addWidget(self.search,1);filter_row.addWidget(self.event_scope);lay.addLayout(filter_row)
         self.tree=QtWidgets.QTreeWidget();self.tree.setHeaderLabels(['Run / Event','Driver','Class','Round','ET','MPH','Data'])
-        self.tree.setColumnWidth(0,235);self.tree.setColumnWidth(1,145);self.tree.setColumnWidth(2,135);self.tree.setColumnWidth(3,58);self.tree.setColumnWidth(4,62);self.tree.setColumnWidth(5,70);self.tree.setColumnWidth(6,62)
+        self.tree.setColumnWidth(0,185);self.tree.setColumnWidth(1,120);self.tree.setColumnWidth(2,112);self.tree.setColumnWidth(3,48);self.tree.setColumnWidth(4,54);self.tree.setColumnWidth(5,60);self.tree.setColumnWidth(6,48)
         self.tree.setAlternatingRowColors(True);self.tree.itemDoubleClicked.connect(self._double);self.tree.currentItemChanged.connect(self._selection_changed);lay.addWidget(self.tree,1)
-        row=QtWidgets.QHBoxLayout();self.open_btn=QtWidgets.QPushButton('Open Data');self.attach_btn=QtWidgets.QPushButton('Attach Data Log…');self.offline_btn=QtWidgets.QPushButton('Cache Offline');self.incident_btn=QtWidgets.QPushButton('New Analysis Case');self.sync_btn=QtWidgets.QPushButton('Sync Tech Services');self.refresh_btn=QtWidgets.QPushButton('Refresh View')
-        for b in (self.open_btn,self.attach_btn,self.offline_btn,self.incident_btn):row.addWidget(b)
-        row.addStretch(1);row.addWidget(self.sync_btn);row.addWidget(self.refresh_btn);lay.addLayout(row)
-        note=QtWidgets.QLabel('Select the authoritative NHRA Tech Services Run, then attach its data log. Velocity keeps that local Run association and managed copy across restarts; nothing is uploaded or matched by filename.')
-        note.setWordWrap(True);note.setStyleSheet('color:#aeb4bb;padding:2px');lay.addWidget(note)
-        self.summary=QtWidgets.QLabel();self.summary.setStyleSheet('color:#aeb4bb;padding:2px');lay.addWidget(self.summary)
+        self.open_btn=QtWidgets.QPushButton('Open');self.attach_btn=QtWidgets.QPushButton('Attach Data…');self.offline_btn=QtWidgets.QPushButton('Cache');self.incident_btn=QtWidgets.QPushButton('New Case');self.sync_btn=QtWidgets.QPushButton('Sync');self.refresh_btn=QtWidgets.QPushButton('Refresh')
+        primary=QtWidgets.QHBoxLayout()
+        for b in (self.open_btn,self.attach_btn,self.incident_btn):primary.addWidget(b)
+        primary.addStretch(1);lay.addLayout(primary)
+        secondary=QtWidgets.QHBoxLayout()
+        for b in (self.sync_btn,self.offline_btn,self.refresh_btn):secondary.addWidget(b)
+        secondary.addStretch(1);lay.addLayout(secondary)
+        self.open_btn.setToolTip('Open the data already attached to the selected Tech Services Run.')
+        self.attach_btn.setToolTip('Attach a local data log to the selected authoritative Run.')
+        self.sync_btn.setToolTip('Sync current/recent NHRA Tech Services data in the background.')
+        self.summary=QtWidgets.QLabel();self.summary.setStyleSheet('color:#9fa6ad;padding:2px');lay.addWidget(self.summary)
         self.search.textChanged.connect(lambda _t:self.refresh());self.event_scope.currentIndexChanged.connect(lambda _i:self.refresh());self.sync_btn.clicked.connect(lambda _checked=False:self.syncRequested.emit());self.refresh_btn.clicked.connect(self.refresh)
         self.open_btn.clicked.connect(lambda:self._emit(self.openRunRequested));self.attach_btn.clicked.connect(lambda:self._emit(self.attachTelemetryRequested));self.offline_btn.clicked.connect(self._offline);self.incident_btn.clicked.connect(lambda:self._emit(self.analysisCaseRequested))
         self.refresh()
@@ -1232,6 +1238,29 @@ class CursorBus(QtCore.QObject):
         self.b = 1.0
 
 
+
+class VelocityWaveformViewBox(pg.ViewBox):
+    """Waveform interaction tuned for motorsport review.
+
+    Left-button drag is reserved for the engineering cursor, matching the
+    ATLAS-style review workflow. Middle-button drag retains X-pan and the
+    wheel/right-button interactions remain delegated to pyqtgraph with Y
+    interaction disabled by the owning WaveformDisplay.
+    """
+    cursorDragged = QtCore.Signal(float)
+
+    def mouseDragEvent(self, ev, axis=None):
+        try:
+            if ev.button() == QtCore.Qt.LeftButton:
+                pos = self.mapSceneToView(ev.scenePos())
+                self.cursorDragged.emit(float(pos.x()))
+                ev.accept()
+                return
+        except Exception:
+            pass
+        super().mouseDragEvent(ev, axis=axis)
+
+
 class WaveformDisplay(QtWidgets.QWidget):
     titleChanged = QtCore.Signal(str)
 
@@ -1246,11 +1275,11 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.channel_styles: Dict[str, Dict[str, Any]] = {}
         self.x_mode = "Time from Launch"
         self.compare = False
-        self.show_readout = True
+        self.show_readout = False
         self.show_navigator = False
         self.show_legend = True
         self.show_ab_cursors = False
-        self.reference_visible = True
+        self.reference_visible = False
         self.show_stat_delta = True
         self.show_stat_min = False
         self.show_stat_max = False
@@ -1263,6 +1292,9 @@ class WaveformDisplay(QtWidgets.QWidget):
         self._data_cache = DisplaySeriesCache(max_entries=512)
         self._plots: List[Any] = []
         self._lines: List[Tuple[Any, Any, Any]] = []
+        self._reference_regions: List[Any] = []
+        self._plot_headers: List[Tuple[Any, Any, List[str]]] = []
+        self._waveform_shortcuts: List[Any] = []
         self._syncing = False
         self._range_history: List[Tuple[float,float]] = []
         self._last_range: Optional[Tuple[float,float]] = None
@@ -1330,7 +1362,9 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.more_ab_action.toggled.connect(self._set_ab_visible)
         self.more_snap_action = more.addAction("Snap cursor to samples"); self.more_snap_action.setCheckable(True); self.more_snap_action.setChecked(True)
         self.more_snap_action.toggled.connect(self.snap_box.setChecked)
-        readout_columns=more.addMenu('Readout columns')
+        self.more_readout_action = more.addAction("Detailed channel table"); self.more_readout_action.setCheckable(True); self.more_readout_action.setChecked(False)
+        self.more_readout_action.toggled.connect(self._set_readout_visible)
+        readout_columns=more.addMenu('Detailed table columns')
         self._readout_stat_actions={}
         for label,attr in [('Δ vs Ref','show_stat_delta'),('Minimum','show_stat_min'),('Maximum','show_stat_max'),('Mean','show_stat_mean'),('Std dev','show_stat_std')]:
             action=readout_columns.addAction(label);action.setCheckable(True);action.setChecked(bool(getattr(self,attr)));action.toggled.connect(lambda checked,a=attr:self._set_readout_stat(a,checked));self._readout_stat_actions[attr]=action
@@ -1364,7 +1398,7 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.readout.verticalHeader().setVisible(False);self.readout.verticalHeader().setDefaultSectionSize(19);self.readout.verticalHeader().setMinimumSectionSize(18)
         header=self.readout.horizontalHeader(); header.setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents); header.setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch);header.setMinimumHeight(22)
         self.readout.setMinimumHeight(48);self.readout.setMaximumHeight(168);self.readout.setWordWrap(False)
-        self.readout.setToolTip("Compact live values. Ref is cursor A. Optional Min/Max/Mean/Std columns are available under More → Readout columns.")
+        self.readout.setToolTip("Optional detailed value table. Normal cursor/reference values are shown directly in each waveform band.")
         self.readout.setColumnHidden(8, True); self.readout.setColumnHidden(9, True)
         self.readout.setAlternatingRowColors(True)
         self.readout.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
@@ -1372,10 +1406,16 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.readout.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.readout.customContextMenuRequested.connect(self._readout_menu)
         self._set_stat_column_visibility()
+        self.readout.setVisible(self.show_readout)
         layout.addWidget(self.readout)
 
         self.graph = pg.GraphicsLayoutWidget()
         self.graph.setBackground((20, 22, 25))
+        try:
+            self.graph.ci.layout.setContentsMargins(2, 2, 2, 2)
+            self.graph.ci.layout.setSpacing(1)
+        except Exception:
+            pass
         layout.addWidget(self.graph, 1)
 
         # Full-session navigator / zoom window.  This is deliberately kept
@@ -1396,8 +1436,9 @@ class WaveformDisplay(QtWidgets.QWidget):
         # ATLAS-style cursor surface: click positions the shared cursor and the
         # vertical cursor line itself is draggable. Merely hovering over a
         # waveform never changes engineering state. Shift/Ctrl click place A/B.
-        self.graph.setToolTip('Click: position cursor   Drag cursor line: scrub   Shift+click: A   Ctrl+click: B   Wheel: zoom X')
+        self.graph.setToolTip('Click or left-drag: move cursor   R: reference cursor   +/-: zoom X   Middle-drag: pan X   Wheel: zoom X')
         self.graph.scene().sigMouseClicked.connect(self._scene_mouse_clicked)
+        self._install_waveform_shortcuts()
 
         # Cursor readout is also coalesced.  Signals can still move cursor lines
         # immediately; expensive text/table work happens at most ~30 Hz.
@@ -1414,6 +1455,99 @@ class WaveformDisplay(QtWidgets.QWidget):
         cursors.cursorAMoved.connect(self._schedule_readout)
         cursors.cursorBMoved.connect(self._schedule_readout)
         cursors.rangeChanged.connect(self._external_range)
+
+
+    def _set_readout_visible(self, visible: bool):
+        self.show_readout = bool(visible)
+        self.readout.setVisible(self.show_readout)
+        if getattr(self, 'more_readout_action', None) is not None and self.more_readout_action.isChecked() != self.show_readout:
+            self.more_readout_action.setChecked(self.show_readout)
+
+    def _bind_waveform_shortcut(self, sequence: str, callback):
+        shortcut = QtGui.QShortcut(QtGui.QKeySequence(sequence), self)
+        shortcut.setContext(QtCore.Qt.WidgetWithChildrenShortcut)
+        shortcut.activated.connect(callback)
+        self._waveform_shortcuts.append(shortcut)
+        return shortcut
+
+    def _install_waveform_shortcuts(self):
+        # WidgetWithChildrenShortcut is deliberate: focus normally belongs to a
+        # pyqtgraph child item, so relying only on QWidget.keyPressEvent causes
+        # R / +/- to appear intermittent.
+        self._bind_waveform_shortcut('R', self._toggle_reference_cursor)
+        self._bind_waveform_shortcut('+', lambda: self._zoom_x(0.70))
+        self._bind_waveform_shortcut('=', lambda: self._zoom_x(0.70))
+        self._bind_waveform_shortcut('-', lambda: self._zoom_x(1.40))
+        self._bind_waveform_shortcut('Ctrl+Z', self._previous_view)
+        self._bind_waveform_shortcut('Ctrl+Alt+Z', self._fit_run)
+
+    def _cursor_dragged(self, x: float):
+        # Left-drag anywhere in a waveform is the primary engineering cursor
+        # gesture. Panning remains available with middle-drag.
+        self.setFocus(QtCore.Qt.MouseFocusReason)
+        self._cursor_move(float(x))
+
+    def _update_reference_regions(self):
+        lo = min(float(self.cursors.a), float(self.cursors.x))
+        hi = max(float(self.cursors.a), float(self.cursors.x))
+        for region in self._reference_regions:
+            try:
+                region.setRegion((lo, hi))
+                region.setVisible(bool(self.reference_visible))
+            except Exception:
+                pass
+
+    @staticmethod
+    def _fmt_cursor_value(value: float) -> str:
+        return f"{float(value):.6g}" if np.isfinite(value) else "—"
+
+    def _position_plot_header(self, plot, item):
+        try:
+            xr, yr = plot.viewRange()
+            xspan = max(float(xr[1]) - float(xr[0]), 1e-12)
+            yspan = max(float(yr[1]) - float(yr[0]), 1e-12)
+            item.setPos(float(xr[0]) + xspan * 0.006, float(yr[1]) - yspan * 0.015)
+        except Exception:
+            pass
+
+    def _refresh_plot_headers(self):
+        handle = self.store.active
+        if handle is None:
+            return
+        for plot, item, chans in self._plot_headers:
+            chunks = []
+            for channel in chans:
+                vals = self._data_cache.sample_many(
+                    handle.run,
+                    channel,
+                    (self.cursors.x, self.cursors.a),
+                    self.x_mode,
+                    handle.time_alignment_s,
+                )
+                vals = self._convert_for_display(channel, handle.run, vals)
+                current = vals[0] if len(vals) else np.nan
+                ref = vals[1] if len(vals) > 1 else np.nan
+                delta = current - ref if np.isfinite(current) and np.isfinite(ref) else np.nan
+                color = self._style_for(channel, self.channels.index(channel) if channel in self.channels else 0).get('color', '#dddddd')
+                unit = display_label(self._display_unit(channel, handle.run))
+                current_text = self._fmt_cursor_value(current)
+                name = html.escape(str(channel))
+                unit_text = f" {html.escape(str(unit))}" if unit else ""
+                chunk = (
+                    f"<span style='color:{color};font-weight:600'>{name}</span>"
+                    f"&nbsp;<span style='color:#f2f2f2'>{current_text}{unit_text}</span>"
+                )
+                if self.reference_visible:
+                    chunk += (
+                        f"&nbsp;&nbsp;<span style='color:#ff6b6b'>R {self._fmt_cursor_value(ref)}</span>"
+                        f"&nbsp;<span style='color:#b8bec6'>Δ {self._fmt_cursor_value(delta)}</span>"
+                    )
+                chunks.append(chunk)
+            try:
+                item.setHtml("&nbsp;&nbsp;&nbsp;&nbsp;".join(chunks))
+                self._position_plot_header(plot, item)
+            except Exception:
+                pass
 
     def _set_launch_zero_from_cursor(self):
         handle = self.store.active
@@ -1730,14 +1864,27 @@ class WaveformDisplay(QtWidgets.QWidget):
             if action.isChecked()!=wanted:action.setChecked(wanted)
 
     def _toggle_reference_cursor(self):
-        self.reference_visible=not self.reference_visible
-        for lines in self._lines: lines[1].setVisible(self.reference_visible)
-        self.zero_label.setText(f"Cursor  {self.cursors.x:.4f}  Ref {'ON' if self.reference_visible else 'OFF'}")
+        # ATLAS-style R shortcut: adding a reference captures the current
+        # cursor location; pressing R again removes the reference.
+        if self.reference_visible:
+            self.reference_visible = False
+        else:
+            self.reference_visible = True
+            self.cursors.a = float(self.cursors.x)
+            self.cursors.cursorAMoved.emit(self.cursors.a)
+        for lines in self._lines:
+            lines[1].setVisible(self.reference_visible)
+        self._update_reference_regions()
+        self._refresh_readout()
 
     def _zoom_x(self, factor: float):
-        if not self._plots:return
+        if not self._plots:
+            return
         lo,hi=self._plots[0].viewRange()[0]
-        center=(float(lo)+float(hi))/2.0;half=max(1e-9,(float(hi)-float(lo))*float(factor)/2.0)
+        lo=float(lo);hi=float(hi)
+        cursor=float(self.cursors.x)
+        center=cursor if lo <= cursor <= hi else (lo+hi)/2.0
+        half=max(1e-9,(hi-lo)*float(factor)/2.0)
         self._plots[0].setXRange(center-half,center+half,padding=0)
 
     def _cycle_x_mode(self):
@@ -1831,8 +1978,13 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.cursors.rangeChanged.emit(lo,hi,self)
 
     def _set_a_from_cursor(self):
+        self.reference_visible = True
         self.cursors.a = float(self.cursors.x)
         self.cursors.cursorAMoved.emit(self.cursors.a)
+        for lines in self._lines:
+            lines[1].setVisible(True)
+        self._update_reference_regions()
+        self._refresh_readout()
 
     def _set_b_from_cursor(self):
         self.cursors.b = float(self.cursors.x)
@@ -1981,7 +2133,12 @@ class WaveformDisplay(QtWidgets.QWidget):
 
     def _refresh_readout(self):
         handle = self.store.active
-        self.zero_label.setText(f"Cursor  {self.cursors.x:.4f}")
+        ref_state = f"  Ref {self.cursors.a:.4f}" if self.reference_visible else ""
+        self.zero_label.setText(f"Cursor  {self.cursors.x:.4f}{ref_state}")
+        self._refresh_plot_headers()
+        self._update_reference_regions()
+        if not self.show_readout:
+            return
         self._ensure_readout_items()
         if handle is None:
             return
@@ -1990,11 +2147,14 @@ class WaveformDisplay(QtWidgets.QWidget):
             vals=self._data_cache.sample_many(handle.run,channel,positions,self.x_mode,handle.time_alignment_s)
             vals=self._convert_for_display(channel,handle.run,vals)
             current = vals[0] if len(vals)>0 else np.nan
-            ref = vals[1] if len(vals)>1 else np.nan
+            ref = vals[1] if len(vals)>1 and self.reference_visible else np.nan
             bval = vals[2] if len(vals)>2 else np.nan
             delta = current - ref if np.isfinite(current) and np.isfinite(ref) else np.nan
-            stats=self._data_cache.region_summary(handle.run,channel,self.cursors.a,self.cursors.x,self.x_mode,handle.time_alignment_s)
-            stat_values=self._convert_for_display(channel,handle.run,np.asarray([stats.get('min',np.nan),stats.get('max',np.nan),stats.get('mean',np.nan),stats.get('std',np.nan)],dtype=float))
+            if self.reference_visible:
+                stats=self._data_cache.region_summary(handle.run,channel,self.cursors.a,self.cursors.x,self.x_mode,handle.time_alignment_s)
+                stat_values=self._convert_for_display(channel,handle.run,np.asarray([stats.get('min',np.nan),stats.get('max',np.nan),stats.get('mean',np.nan),stats.get('std',np.nan)],dtype=float))
+            else:
+                stat_values=np.asarray([np.nan,np.nan,np.nan,np.nan],dtype=float)
             def fmt(v): return f"{float(v):.6g}" if np.isfinite(v) else "—"
             pieces = [channel, display_label(self._display_unit(channel, handle.run)), fmt(current), fmt(ref), fmt(delta), fmt(stat_values[0]), fmt(stat_values[1]), fmt(stat_values[2]), fmt(stat_values[3]), fmt(bval)]
             for col, text in enumerate(pieces):
@@ -2010,7 +2170,7 @@ class WaveformDisplay(QtWidgets.QWidget):
             self._refresh_impl()
         except Exception as exc:
             logging.getLogger(__name__).exception("Waveform render failed")
-            self.graph.clear(); self._plots.clear(); self._lines.clear()
+            self.graph.clear(); self._plots.clear(); self._lines.clear(); self._reference_regions.clear(); self._plot_headers.clear()
             self.render_status.setText("RENDER ERROR — see diagnostic log")
             self.render_status.setStyleSheet("color:#ff7b72; font-weight:bold;")
             try:
@@ -2023,7 +2183,7 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.graph.clear()
         self.render_status.setText("Rendering…"); self.render_status.setStyleSheet("")
         self._rendered_curve_count=0; self._rendered_point_count=0
-        self._plots.clear(); self._lines.clear()
+        self._plots.clear(); self._lines.clear(); self._reference_regions.clear(); self._plot_headers.clear()
         active = self.store.active
         if active is None:
             return
@@ -2060,15 +2220,19 @@ class WaveformDisplay(QtWidgets.QWidget):
 
         first_plot = None
         for row, (_group, chans) in enumerate(groups.items()):
-            p = self.graph.addPlot(row=row, col=0)
-            p.setMouseEnabled(x=True, y=False)  # motorsport waveform convention: wheel/pan affect X only
+            vb = VelocityWaveformViewBox(enableMenu=False)
+            vb.cursorDragged.connect(self._cursor_dragged)
+            p = self.graph.addPlot(row=row, col=0, viewBox=vb)
+            p.setMouseEnabled(x=True, y=False)  # wheel/right/middle navigation affects X only; left-drag owns the cursor
             p.showGrid(x=True, y=True, alpha=0.15)
             # In a one-channel stacked plot the Y-axis already names the trace;
             # a legend just steals plot area.  Keep legends for overlays, unit
             # groups and compare runs where they carry real information.
             if self.show_legend and (self.compare or len(chans)>1 or mode=='Overlay'):
                 p.addLegend(offset=(-8, 8), labelTextColor='#d6d6d6', brush=pg.mkBrush(24,26,29,180), pen=pg.mkPen('#44484d'))
-            p.getAxis('left').setTextPen('#c8c8c8'); p.getAxis('bottom').setTextPen('#c8c8c8')
+            p.getAxis('left').setTextPen('#aeb4bb'); p.getAxis('bottom').setTextPen('#aeb4bb')
+            try:p.getAxis('left').setWidth(52)
+            except Exception:pass
             if first_plot is None:
                 first_plot = p
             else:
@@ -2107,7 +2271,9 @@ class WaveformDisplay(QtWidgets.QWidget):
                     self._rendered_curve_count=getattr(self,'_rendered_curve_count',0)+1
                     self._rendered_point_count=getattr(self,'_rendered_point_count',0)+int(len(x))
             label_unit = self._display_unit(chans[0], run)
-            p.setLabel('left', f"{', '.join(chans)}" + (f" [{display_label(label_unit)}]" if label_unit else ''))
+            # The per-band header carries the channel name/current/reference
+            # values. Keep the Y axis narrow and numeric, like ATLAS/i2.
+            p.setLabel('left', display_label(label_unit) if label_unit else '')
             if row == len(groups)-1:
                 p.setLabel('bottom', self.x_mode)
             else:
@@ -2120,12 +2286,33 @@ class WaveformDisplay(QtWidgets.QWidget):
             if manual_ranges:
                 p.setYRange(min(v[0] for v in manual_ranges), max(v[1] for v in manual_ranges), padding=0)
                 p.enableAutoRange(axis=pg.ViewBox.YAxis, enable=False)
-            cursor = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('#ffffff', width=1))
-            ca = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('#00e5ff', width=1, style=QtCore.Qt.DashLine))
-            cb = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('#ff5bd6', width=1, style=QtCore.Qt.DashLine))
+            ref_region = pg.LinearRegionItem(
+                values=(float(self.cursors.a), float(self.cursors.x)),
+                orientation=pg.LinearRegionItem.Vertical,
+                movable=False,
+                brush=pg.mkBrush(160, 160, 160, 28),
+                pen=pg.mkPen(None),
+            )
+            ref_region.setZValue(-15); ref_region.setVisible(self.reference_visible); p.addItem(ref_region)
+            self._reference_regions.append(ref_region)
+
+            cursor = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('#f4f4f4', width=1.2))
+            ca = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('#ff5252', width=1.2))
+            cb = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('#00e5ff', width=1, style=QtCore.Qt.DashLine))
             cursor.setValue(self.cursors.x); ca.setValue(self.cursors.a); cb.setValue(self.cursors.b)
             ca.setVisible(self.reference_visible); cb.setVisible(self.show_ab_cursors)
             p.addItem(cursor); p.addItem(ca); p.addItem(cb)
+
+            band_header = pg.TextItem(
+                '',
+                anchor=(0, 0),
+                fill=pg.mkBrush(18, 20, 23, 215),
+                border=pg.mkPen('#363a3f', width=1),
+            )
+            band_header.setZValue(1000)
+            p.addItem(band_header, ignoreBounds=True)
+            self._plot_headers.append((p, band_header, list(chans)))
+            p.sigRangeChanged.connect(lambda _plot, _ranges, pp=p, hh=band_header: self._position_plot_header(pp, hh))
             if self.events_box.isChecked():
                 for ann in annotations_for_mode(run,self.x_mode):
                     if ann.kind=='region' and ann.x2 is not None:
@@ -2143,7 +2330,7 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.readout.setVisible(self.show_readout)
         self.navigator.setVisible(self.show_navigator)
         if self.show_navigator:self._refresh_navigator()
-        if self.show_readout:self._refresh_readout()
+        self._refresh_readout()
         if self._rendered_curve_count:
             self.render_status.setText(f"{self._rendered_curve_count} curves / {self._rendered_point_count:,} pts")
             self.render_status.setStyleSheet("color:#78d381;")
@@ -2205,8 +2392,10 @@ class WaveformDisplay(QtWidgets.QWidget):
     def _b_move(self, x):
         if self._syncing: return
         x=self._snap_x(x); self.cursors.b = x; self.cursors.cursorBMoved.emit(x)
-    def _external_cursor(self, x): self._set_lines(0, x)
-    def _external_a(self, x): self._set_lines(1, x)
+    def _external_cursor(self, x):
+        self._set_lines(0, x); self._update_reference_regions()
+    def _external_a(self, x):
+        self._set_lines(1, x); self._update_reference_regions()
     def _external_b(self, x): self._set_lines(2, x)
     def _set_lines(self, idx, x):
         self._syncing = True
@@ -3426,8 +3615,8 @@ class Worksheet(QtWidgets.QMainWindow):
                 if idx>=0:w.layout_mode.setCurrentIndex(idx)
                 w.events_box.setChecked(bool(cfg.get('event_markers',True)))
                 w.compare=bool(cfg.get('compare',True)); w.snap_box.setChecked(bool(cfg.get('snap_cursors',True)))
-                w.show_readout=bool(cfg.get('show_readout',True)); w.show_navigator=bool(cfg.get('show_navigator',False)); w.show_legend=bool(cfg.get('show_legend',True)); w.show_ab_cursors=bool(cfg.get('show_ab_cursors',False)); w.reference_visible=bool(cfg.get('reference_visible',True)); w.show_stat_delta=bool(cfg.get('show_stat_delta',True)); w.show_stat_min=bool(cfg.get('show_stat_min',False)); w.show_stat_max=bool(cfg.get('show_stat_max',False)); w.show_stat_mean=bool(cfg.get('show_stat_mean',False)); w.show_stat_std=bool(cfg.get('show_stat_std',False)); w.max_render_points=int(cfg.get('max_render_points',50000) or 50000)
-                w.more_events_action.setChecked(w.events_box.isChecked()); w.more_nav_action.setChecked(w.show_navigator); w.more_ab_action.setChecked(w.show_ab_cursors); w.more_snap_action.setChecked(w.snap_box.isChecked())
+                w.show_readout=bool(cfg.get('show_readout',False)); w.show_navigator=bool(cfg.get('show_navigator',False)); w.show_legend=bool(cfg.get('show_legend',True)); w.show_ab_cursors=bool(cfg.get('show_ab_cursors',False)); w.reference_visible=bool(cfg.get('reference_visible',False)); w.show_stat_delta=bool(cfg.get('show_stat_delta',True)); w.show_stat_min=bool(cfg.get('show_stat_min',False)); w.show_stat_max=bool(cfg.get('show_stat_max',False)); w.show_stat_mean=bool(cfg.get('show_stat_mean',False)); w.show_stat_std=bool(cfg.get('show_stat_std',False)); w.max_render_points=int(cfg.get('max_render_points',50000) or 50000)
+                w.more_events_action.setChecked(w.events_box.isChecked()); w.more_nav_action.setChecked(w.show_navigator); w.more_ab_action.setChecked(w.show_ab_cursors); w.more_snap_action.setChecked(w.snap_box.isChecked()); w.more_readout_action.setChecked(w.show_readout)
                 for attr,action in getattr(w,'_readout_stat_actions',{}).items(): action.setChecked(bool(getattr(w,attr)))
                 w.readout.setVisible(w.show_readout); w.navigator.setVisible(w.show_navigator); w._set_stat_column_visibility(); w._set_ab_visible(w.show_ab_cursors); w.refresh()
             elif dtype=='values': self.add_values(obj)
@@ -3551,7 +3740,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.compare_sets=CompareSetLibrary()
         self.store=SessionStore(); self.store.catalog=self.catalog; self.cursors=CursorBus(); self.project_path:Optional[str]=None
         self.analysis_library=DefinitionLibrary(name='Workbook Analysis Library'); self.store.analysis_library=self.analysis_library
-        self.worksheets=QtWidgets.QTabWidget(); self.worksheets.setTabsClosable(True); self.worksheets.setMovable(True); self.setCentralWidget(self.worksheets)
+        self.worksheets=QtWidgets.QTabWidget(); self.worksheets.setTabsClosable(True); self.worksheets.setMovable(True)
+        self.worksheets.setDocumentMode(True); self.worksheets.setElideMode(QtCore.Qt.ElideRight); self.worksheets.setUsesScrollButtons(True)
+        self.worksheets.tabBar().setExpanding(False)
+        self.new_sheet_button=QtWidgets.QToolButton(); self.new_sheet_button.setText('+'); self.new_sheet_button.setToolTip('New worksheet (Ctrl+Shift+N)')
+        self.new_sheet_button.clicked.connect(lambda: self.add_worksheet())
+        self.worksheets.setCornerWidget(self.new_sheet_button, QtCore.Qt.TopRightCorner)
+        self.setCentralWidget(self.worksheets)
         self.worksheets.tabCloseRequested.connect(self._close_sheet)
         self._build_actions(); self._build_toolbar(); self._build_docks(); self._build_menus()
         self._refresh_account_actions()
@@ -3597,6 +3792,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.a_layout_simple=QtGui.QAction('Simple Workspace',self); self.a_layout_simple.setShortcut('Ctrl+1'); self.a_layout_simple.triggered.connect(lambda:self._apply_workspace_layout('simple'))
         self.a_layout_investigation=QtGui.QAction('Investigation Workspace',self); self.a_layout_investigation.setShortcut('Ctrl+2'); self.a_layout_investigation.triggered.connect(lambda:self._apply_workspace_layout('investigation'))
         self.a_layout_full=QtGui.QAction('Full Engineering Workspace',self); self.a_layout_full.setShortcut('Ctrl+3'); self.a_layout_full.triggered.connect(lambda:self._apply_workspace_layout('full'))
+        self.a_focus_analysis=QtGui.QAction('Focus Analysis',self); self.a_focus_analysis.setCheckable(True); self.a_focus_analysis.setShortcut('Ctrl+Enter'); self.a_focus_analysis.triggered.connect(self._toggle_focus_analysis)
         self.a_wave=QtGui.QAction('Waveform Display',self); self.a_wave.triggered.connect(lambda:self.current_sheet().add_waveform())
         self.a_values=QtGui.QAction('Values Display',self); self.a_values.triggered.connect(lambda:self.current_sheet().add_values())
         self.a_gauge=QtGui.QAction('Gauge / Status Display',self); self.a_gauge.triggered.connect(lambda:self.current_sheet().add_gauge())
@@ -3729,11 +3925,11 @@ class MainWindow(QtWidgets.QMainWindow):
         left = docks.get('ParametersDock')
         right = docks.get('RunWorkspaceDock')
         if left is not None and left.isVisible():
-            try:self.resizeDocks([left], [300], QtCore.Qt.Horizontal)
+            try:self.resizeDocks([left], [320], QtCore.Qt.Horizontal)
             except Exception:pass
             if mode=='simple':left.raise_()
         if right is not None and right.isVisible():
-            try:self.resizeDocks([right], [360], QtCore.Qt.Horizontal)
+            try:self.resizeDocks([right], [300], QtCore.Qt.Horizontal)
             except Exception:pass
         self.statusBar().showMessage(
             {'simple':'Simple workspace — Run + waveform + essential channels',
@@ -3741,6 +3937,23 @@ class MainWindow(QtWidgets.QMainWindow):
              'full':'Full engineering workspace'}.get(mode, 'Workspace updated'),
             3000,
         )
+
+    def _toggle_focus_analysis(self, checked=False):
+        checked = bool(checked)
+        docks = getattr(self, '_app_docks', {})
+        if checked:
+            self._focus_restore = {name: dock.isVisible() for name, dock in docks.items()}
+            for dock in docks.values():
+                dock.hide()
+            self.statusBar().showMessage('Focus Analysis — Ctrl+Enter to restore side panels', 4000)
+        else:
+            restore = getattr(self, '_focus_restore', None)
+            if restore:
+                for name, dock in docks.items():
+                    dock.setVisible(bool(restore.get(name, False)))
+            else:
+                self._apply_workspace_layout('simple')
+            self.statusBar().showMessage('Analysis panels restored', 2500)
 
     def _build_menus(self):
         m=self.menuBar().addMenu('&File'); m.addAction(self.a_open); m.addAction(self.a_folder); m.addAction(self.a_demo); m.addSeparator(); m.addAction(self.a_load); m.addAction(self.a_recovery); m.addAction(self.a_save); m.addSeparator(); m.addAction(self.a_keep_offline); m.addSeparator(); m.addAction('Exit',self.close)
@@ -3764,7 +3977,7 @@ class MainWindow(QtWidgets.QMainWindow):
         m.addAction(self.a_model_channels)
         m=self.menuBar().addMenu('&Account'); m.addAction(self.a_signin); m.addAction(self.a_signout); m.addSeparator(); m.addAction(self.a_account)
         m=self.menuBar().addMenu('&View'); m.addAction(self.a_command_palette); m.addSeparator()
-        lm=m.addMenu('Workspace Layout'); lm.addAction(self.a_layout_simple); lm.addAction(self.a_layout_investigation); lm.addAction(self.a_layout_full)
+        lm=m.addMenu('Workspace Layout'); lm.addAction(self.a_layout_simple); lm.addAction(self.a_layout_investigation); lm.addAction(self.a_layout_full); m.addAction(self.a_focus_analysis)
         m.addSeparator()
         for dock in self.findChildren(QtWidgets.QDockWidget): m.addAction(dock.toggleViewAction())
         m=self.menuBar().addMenu('&Help'); m.addAction(self.a_shortcuts); m.addAction(self.a_integration_status); m.addSeparator(); m.addAction(self.a_import_support); m.addAction(self.a_selftest); m.addAction(self.a_demo); m.addSeparator(); m.addAction(self.a_logs)
@@ -4143,16 +4356,17 @@ class MainWindow(QtWidgets.QMainWindow):
             'Left / Right — step live cursor one sample<br>'
             'Shift+Left / Shift+Right — move cursor faster (ATLAS); Ctrl+Left/Right also retained<br>'
             'Ctrl+[ / Ctrl+] — previous / next event (ATLAS); Alt+Left/Right also supported<br>'
-            'Home / End — cursor to recording boundary &nbsp;&nbsp; + / - — zoom in/out<br>'
-            'R — toggle reference cursor &nbsp;&nbsp; M/X/N/E/Q — toggle Min/Max/Mean/Delta/Std statistics<br>'
+            'Click / left-drag waveform — position or scrub the live cursor &nbsp;&nbsp; Middle-drag — pan X<br>'
+            'Home / End — cursor to recording boundary &nbsp;&nbsp; + / - — zoom X around cursor<br>'
+            'Ctrl+Z — previous zoom &nbsp;&nbsp; Ctrl+Alt+Z — fit drag run<br>'
+            'R — add/remove red reference cursor at current position &nbsp;&nbsp; M/X/N/E/Q — toggle Min/Max/Mean/Delta/Std statistics<br>'
             'K — cycle Time/Distance axis &nbsp;&nbsp; D — display properties &nbsp;&nbsp; P/Insert — parameter search<br>'
-            'Shift+click waveform — place Ref cursor A<br>'
-            'Ctrl+click waveform — place cursor B<br><br>'
+            'Shift+click waveform — place reference cursor directly &nbsp;&nbsp; Ctrl+click — place cursor B<br><br>'
             '<b>Application</b><br>'
             'Ctrl+O — open log &nbsp;&nbsp; Ctrl+S — save workbook &nbsp;&nbsp; Ctrl+K — command palette<br>'
             'Ctrl+P / Ctrl+Q — channel search / Quick Access &nbsp;&nbsp; Ctrl+M — calculated channel &nbsp;&nbsp; Ctrl+I — inference center<br>'
             'Ctrl+Shift+P — Pro Stock shift report &nbsp;&nbsp; Ctrl+Shift+R — A-B statistics display<br>'
-            'Ctrl+Alt+Left / Right — step Compare reference Run<br><br>'
+            'Ctrl+Alt+Left / Right — step Compare reference Run &nbsp;&nbsp; Ctrl+Enter — focus/restore analysis workspace<br><br>'
             'Additional McLaren-style bindings will be added deliberately as their exact behavior is verified; the application will not silently assign familiar keys to different actions.'
         )
         QtWidgets.QMessageBox.information(self,'Keyboard Shortcuts',text)
@@ -5664,7 +5878,21 @@ def _style(app):
     palette.setColor(QtGui.QPalette.Text,QtGui.QColor(225,225,225));palette.setColor(QtGui.QPalette.Button,QtGui.QColor(45,48,52));palette.setColor(QtGui.QPalette.ButtonText,QtGui.QColor(230,230,230))
     palette.setColor(QtGui.QPalette.Highlight,QtGui.QColor(55,115,170));palette.setColor(QtGui.QPalette.HighlightedText,QtGui.QColor(255,255,255))
     app.setPalette(palette)
-    app.setStyleSheet('''QDockWidget::title { background:#292c30; padding:5px; } QToolBar { spacing:4px; } QTreeWidget,QTableWidget { gridline-color:#3b3e42; } QTabBar::tab { padding:7px 14px; }''')
+    app.setStyleSheet('''
+        QMainWindow::separator { background:#24272b; width:2px; height:2px; }
+        QDockWidget::title { background:#25282c; padding:4px 6px; border-bottom:1px solid #34383d; }
+        QToolBar { spacing:3px; padding:2px; border-bottom:1px solid #34383d; background:#25282c; }
+        QTreeWidget,QTableWidget { gridline-color:#34383d; alternate-background-color:#1d2024; }
+        QHeaderView::section { background:#2b2e33; color:#d8d8d8; padding:3px 5px; border:0; border-right:1px solid #3a3e43; border-bottom:1px solid #3a3e43; }
+        QTabWidget::pane { border:0; border-top:1px solid #34383d; }
+        QTabBar::tab { padding:5px 12px; margin-right:1px; background:#25282c; border:0; border-bottom:2px solid transparent; }
+        QTabBar::tab:selected { background:#30343a; border-bottom:2px solid #5b9bd5; color:#ffffff; }
+        QTabBar::tab:hover { background:#2d3136; }
+        QPushButton,QToolButton { min-height:20px; padding:2px 7px; }
+        QComboBox,QLineEdit { min-height:20px; }
+        QScrollBar:vertical { width:11px; }
+        QScrollBar:horizontal { height:11px; }
+    ''')
 
 
 def main():

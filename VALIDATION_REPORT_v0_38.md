@@ -1,105 +1,48 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.8**
+Validated build: **0.38.0-dev.11**
 
 ## Scope
 
-This validation covers the staged/background NHRA Tech Services synchronization and account/access UX fixes on top of the v0.38 simplified Run-first engineering workspace, catalog schema v8 standardized Run reports, authoritative Tech Services timing/weather hydration, and direct logger support. No changes were made to the `nhratechservices` repository or server data.
+This validation covers the dev.11 ATLAS-style waveform interaction and workbook-shell usability pass on top of the staged/background Tech Services sync, protected account flow, manual launch re-zero, persistent Run-linked local data logs, Run-first workspace, and native logger support.
 
 ## Results
 
-- The dev.8 full automated suite completed **223/223 tests**.
-- New regression coverage verifies current-event prioritization and most-recent-completed-event fallback when the calendar is between events.
-- The authentication/security regression now verifies that source/development execution is protected by default unless the explicit development bypass is set.
-- `python -m compileall -q .` passed.
-- **3/3 bundled native import/plot pipelines passed**:
-  - RacePak/DataLink `.rpk`
-  - MoTeC `.ld`
-  - MaxxECU `.MaxxECU-log`
-- Release/provenance audit passed with the pinned upstream references:
-  - RacingSystemsAnalysis `1556ac70684908038fe47a9fe54e2f506cc4e71c`
-  - nhratechservices `77eb280fe94825f93f2cdfdd3ab2568851aa6a19`
-- Release audit findings: **0 errors / 0 warnings**.
+- Full automated suite completed **234/234 tests**.
+- `python -m py_compile desktop.py` passed.
+- New source-level regression coverage verifies:
+  - left-drag-anywhere waveform cursor ownership through `VelocityWaveformViewBox`;
+  - Widget-with-children shortcut binding for `R`, `+`, and `-`;
+  - reference cursor capture/visibility/range-window behavior;
+  - compact per-band waveform headers replacing the always-visible detailed value table;
+  - document-style worksheet tabs, worksheet `+` control and `Ctrl+Enter` focus mode;
+  - compact Run-browser action layout that no longer forces an oversized left dock.
+- Existing launch-zero, Run/data-log persistence, Tech Services metadata, import, analysis, reconstruction, fit-study, display-cache and workbook regressions all remained green.
 
+## Waveform interaction regression
 
-## Staged/background Tech Services sync regression
+The dev.11 Waveform interaction intentionally follows the verified ATLAS model where practical:
 
-Validation covers:
+- hover does not change engineering state;
+- click positions the live cursor;
+- left-drag anywhere in a waveform scrubs the live cursor;
+- middle-drag retains X-axis pan;
+- mouse-wheel and keyboard zoom operate on X only;
+- `R` adds/removes a red reference cursor at the current cursor position;
+- a shaded window identifies the live↔reference analysis range;
+- `+` / `-` zoom around the live cursor when it is visible;
+- `Ctrl+Z` returns to the previous view;
+- `Ctrl+Alt+Z` fits the drag run.
 
-- current event prioritized first when today falls inside an event window;
-- most recently completed event prioritized first when between events;
-- per-event metadata synchronization preserving the existing idempotent catalog behavior;
-- first-event completion refreshing the Run browser before the season-wide worker finishes;
-- remaining event hydration running on a Qt worker thread rather than the GUI thread;
-- source builds requiring Tech Services authorization by default;
-- explicit `NHRA_TECH_DEV_UNAUTHENTICATED=1` bypass remaining available for controlled development/CI.
+## Workbook / desktop usability regression
 
-## Windows Tech Services sign-in regression
+- Primary waveform remains the worksheet center.
+- Live channel values move into compact plot-band headers so graph area is not consumed by an always-visible table.
+- Detailed channel values/statistics remain opt-in under **More → Detailed channel table**.
+- Worksheet tabs use document-style presentation and expose a compact `+` control.
+- `Ctrl+Enter` toggles **Focus Analysis**, temporarily hiding application side docks for full-width waveform review.
+- Run-browser primary/secondary actions are split into compact rows and the normal simple-workspace dock targets are narrower.
 
-Focused validation covers:
+## Authority / persistence invariants
 
-- provider-specific compact credential payloads that omit persisted identity/capability duplication;
-- secure restore of the cached seven-day access token followed by live identity/capability refresh;
-- payload size staying below the Windows generic Credential Manager blob limit in the qualified test case;
-- no password field in the persisted payload;
-- authorization/capability behavior remaining unchanged after restore;
-- continued fail-closed behavior with no plaintext credential fallback.
-
-The desktop sign-in path also now distinguishes server authentication from credential-vault persistence: a vault write problem does not report a false bad-login failure or discard the already-authenticated in-memory session.
-
-## Usability / progressive-disclosure validation
-
-Automated source-level regression checks cover:
-
-- permanent toolbar limited to Open / Save / Fit Run / active Run / X-axis / optional Compare;
-- Compare Reference controls hidden until Compare is enabled;
-- default Simple Workspace limited to Run Browser, Run Workspace and Channel Explorer rather than exposing every engineering dock;
-- Run Browser and Channel Explorer sharing one left-side tab group;
-- Channel Explorer defaulting to class-relevant **Essentials**, with **All channels** one selector away;
-- text search bypassing the Essentials filter so a search always spans the complete logger channel catalog;
-- standard class layout producing one core waveform rather than multiple automatic panels;
-- class-layout application remaining separate from standardized-report generation;
-- automatic default waveform selection preferring the authoritative class profile when available;
-- Run Workspace reduced to Summary / Data / Engineering while retaining provenance in tooltips/advanced detail.
-
-## Run Workspace / authority validation
-
-Automated tests continue to cover:
-
-- canonical category → class profile resolution without Run ownership inference from filenames;
-- Pro Stock standardized RSA seed visibility;
-- immutable/idempotent fingerprinted `run_reports` persistence;
-- report source-Asset validation;
-- expected-report/pending-report state;
-- latest-vs-previous same-driver Pro Stock shift comparison and alert generation;
-- Tech Services 60 ft, 330 ft, 1000 ft and 1000 MPH timing-name translation into the canonical timing model;
-- existing catalog upgrade behavior through schema v8.
-
-## Authority / safety boundary
-
-- Tech Services Events/Runs/timing/weather remain authoritative.
-- Local telemetry is associated only after the user selects the canonical Run.
-- No filename-to-Run matching was added.
-- Raw Assets remain immutable evidence.
-- Standardized reports are derived local metadata and do not overwrite official timing/weather or telemetry.
-- The desktop still does not infer Event Entry → Run linkage while the server read API does not expose `event_entry_id`.
-- The current Tech Services integration remains read-only for application data.
-
-## Remaining external validation
-
-This build still requires a real Windows Qt/pyqtgraph smoke test for the simplified toolbar, dock/tab arrangement, Essentials channel browser, and compact Run Workspace. The automated environment validates Python/data behavior and static UI contracts but does not prove Windows widget layout/painting.
-
-
-## v0.38.0-dev.9 validation
-
-- Added manual launch-zero regression tests covering detector override, Time-from-Launch waveform re-zero and raw Logger Time immutability.
-- Added UI/source-contract coverage for the visible Zero control plus explicit Sync Tech Services / Refresh View separation.
-- Full automated pytest suite passed: **227/227 tests** across three execution groups. Python compilation also passed before packaging the dev.9 bundle.
-
-
-## v0.38.0-dev.10 focused validation
-
-- Added regression coverage for click/drag cursor semantics, X-only waveform mouse navigation, compact readout defaults, friendly Run-browser labels and visible data-log status.
-- Added a catalog-reopen test proving a managed local data log remains linked to its authoritative NHRA Tech Services Run across application restarts.
-- Verified Python compilation after UI/catalog changes.
-- Full automated suite: **231/231 tests passed** when executed in file groups to avoid the container wall-clock limit.
+No source evidence, official NHRA timing, canonical weather, or Tech Services Run identity is rewritten by these UI changes. Manual launch zero remains an analysis coordinate override. Local data-log attachments remain explicit managed Velocity associations to an authoritative Run and are not uploaded or inferred from filenames.

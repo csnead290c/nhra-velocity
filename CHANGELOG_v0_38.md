@@ -1,5 +1,17 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.11 — ATLAS-style waveform interaction + workbook shell
+
+- Reworked the Waveform left-button interaction so **click or left-drag anywhere in the plot moves the engineering cursor**. The user no longer has to hit the one-pixel cursor line to scrub a run. Middle-drag remains available for X-axis panning.
+- Fixed keyboard handling by binding Waveform shortcuts with `WidgetWithChildrenShortcut`, so focus inside pyqtgraph no longer makes **R / + / -** appear to stop working.
+- Implemented the ATLAS-style **Reference Cursor** behavior: `R` adds a red reference at the current cursor position, `R` again removes it, and a subtle shaded window shows the analysis range between the live and reference cursors. The normal legend/readout shows reference values and deltas only while the reference is active.
+- Restored `+` / `-` X-axis zoom and added `Ctrl+Z` previous-view plus `Ctrl+Alt+Z` fit-run behavior. Keyboard zoom is centered on the live cursor when it is inside the visible range.
+- Replaced the always-visible waveform value table with **compact per-band headers** embedded directly in each waveform plot. Each band shows channel name, current value/unit and, when active, reference value + delta. The detailed table is still available under **More → Detailed channel table**.
+- Narrowed stacked Waveform Y axes to numeric/unit scales; channel names and live values now live in the plot header rather than consuming vertical axis-label space.
+- Tightened the Run browser so its action buttons no longer force an oversized left dock. Primary and secondary actions are split into compact rows and the default dock target is narrower.
+- Improved the workbook shell with compact document-style worksheet tabs, a `+` worksheet button and **Ctrl+Enter Focus Analysis** mode that temporarily hides side docks for a full-width waveform review.
+- Refined the application stylesheet for denser headers, tabs, toolbars, splitters and tables while retaining the existing dark trackside theme.
+
 ## v0.38.0-dev.10 — trackside waveform + Run-browser usability
 
 - Changed the waveform cursor to the established ATLAS-style interaction: **click to position**, **drag the vertical cursor line to scrub**, and arrow keys for sample-precise movement. Merely hovering over a graph no longer moves the engineering cursor. Shift-click and Ctrl-click continue to place A/B cursors.

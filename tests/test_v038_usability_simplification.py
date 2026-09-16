@@ -38,20 +38,26 @@ def test_waveform_exposes_manual_launch_rezero_control():
     assert 'Set Cursor as Launch (T=0)' in source
     assert 'Use Auto-Detected Launch' in source
     assert 'Zero: Manual' in source
-    assert 'Refresh View' in source
+    assert "self.refresh_btn=QtWidgets.QPushButton('Refresh')" in source
     assert 'Sync Tech Services' in source
 
 
 def test_waveform_cursor_and_zoom_follow_atlas_style_interaction():
     source = Path(__file__).resolve().parents[1].joinpath('desktop.py').read_text(encoding='utf-8')
-    # Hover should never move the engineering cursor; click positions it and
-    # the InfiniteLine remains movable for click/drag scrubbing.
+    # Hover never moves engineering state. Click positions the cursor, and
+    # left-drag anywhere in the ViewBox continuously scrubs it.
     assert 'sigMouseMoved' not in source
     assert 'sigMouseClicked.connect(self._scene_mouse_clicked)' in source
+    assert 'class VelocityWaveformViewBox' in source
+    assert 'if ev.button() == QtCore.Qt.LeftButton' in source
+    assert 'self.cursorDragged.emit(float(pos.x()))' in source
     assert "cursor = pg.InfiniteLine(angle=90, movable=True" in source
-    # Waveform mouse interactions intentionally affect X only; Y scaling is
-    # controlled by auto-range / trace properties rather than accidental wheel zoom.
+    # Navigation is X-only and the ATLAS-style keyboard surface is bound even
+    # when focus belongs to a pyqtgraph child.
     assert "p.setMouseEnabled(x=True, y=False)" in source
+    assert "self._bind_waveform_shortcut('R', self._toggle_reference_cursor)" in source
+    assert "self._bind_waveform_shortcut('+', lambda: self._zoom_x(0.70))" in source
+    assert "self._bind_waveform_shortcut('-', lambda: self._zoom_x(1.40))" in source
 
 
 def test_run_browser_hides_opaque_remote_ids_and_surfaces_data_logs():
@@ -60,15 +66,45 @@ def test_run_browser_hides_opaque_remote_ids_and_surfaces_data_logs():
     assert "_friendly_run_label" in block
     assert "data_log_count" in block
     assert "local_data_log_count" in block
-    assert "Attach Data Log…" in block
+    assert "Attach Data…" in block
     assert "run_label=(r.get('run_key')" not in block
 
 
-def test_waveform_readout_defaults_to_compact_columns():
+def test_waveform_values_live_in_each_plot_band_by_default():
     source = Path(__file__).resolve().parents[1].joinpath('desktop.py').read_text(encoding='utf-8')
     block = source.split('class WaveformDisplay',1)[1].split('class ValuesDisplay',1)[0]
+    assert 'self.show_readout = False' in block
     assert 'self.show_stat_min = False' in block
     assert 'self.show_stat_max = False' in block
     assert 'self.show_stat_mean = False' in block
-    assert "readout_columns=more.addMenu('Readout columns')" in block
-    assert 'setDefaultSectionSize(19)' in block
+    assert 'Detailed channel table' in block
+    assert 'band_header = pg.TextItem' in block
+    assert '_refresh_plot_headers' in block
+
+
+def test_reference_cursor_shortcut_captures_current_cursor_and_shows_range():
+    source = Path(__file__).resolve().parents[1].joinpath('desktop.py').read_text(encoding='utf-8')
+    block = source.split('class WaveformDisplay',1)[1].split('class ValuesDisplay',1)[0]
+    assert 'self.reference_visible = False' in block
+    assert 'self.cursors.a = float(self.cursors.x)' in block
+    assert "ca = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen('#ff5252'" in block
+    assert 'ref_region = pg.LinearRegionItem' in block
+    assert '_update_reference_regions' in block
+
+
+def test_workbook_shell_has_compact_document_tabs_and_focus_mode():
+    source = Path(__file__).resolve().parents[1].joinpath('desktop.py').read_text(encoding='utf-8')
+    assert 'self.worksheets.setDocumentMode(True)' in source
+    assert "self.new_sheet_button.setText('+')" in source
+    assert "self.a_focus_analysis.setShortcut('Ctrl+Enter')" in source
+    assert "self.resizeDocks([left], [320]" in source
+    assert "self.resizeDocks([right], [300]" in source
+
+
+def test_run_browser_actions_do_not_force_an_overwide_left_dock():
+    source = Path(__file__).resolve().parents[1].joinpath('desktop.py').read_text(encoding='utf-8')
+    block = source.split('class RunBrowser',1)[1].split('class AnalysisCaseBrowser',1)[0]
+    assert "self.open_btn=QtWidgets.QPushButton('Open')" in block
+    assert "self.attach_btn=QtWidgets.QPushButton('Attach Data…')" in block
+    assert 'primary=QtWidgets.QHBoxLayout()' in block
+    assert 'secondary=QtWidgets.QHBoxLayout()' in block
