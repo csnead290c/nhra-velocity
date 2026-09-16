@@ -1,5 +1,14 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.9 — manual launch re-zero + Run-browser polish
+
+- Added an explicit waveform **Zero** control. Place the cursor at the true launch point and choose **Set Cursor as Launch (T=0)**; every Time/Distance-from-Launch view, drag-run fit window and official beam overlay then uses the corrected launch anchor without modifying raw logger samples or NHRA official timing.
+- Added **Use Auto-Detected Launch** to remove a manual zero and return to the detector. The waveform visibly shows **Zero: Auto** versus **Zero: Manual** so the review state is never hidden.
+- Manual launch zero is persisted in `.nhratech` workbooks and, for a catalog-attached telemetry Asset, in the local Asset→Run time mapping with an explicit zero-time anchor. Reopening the Run restores the engineering correction.
+- The Run browser now exposes **Sync Tech Services** directly and renames the local-only button to **Refresh View**, avoiding the previous ambiguity between a local repaint and a server synchronization.
+- Catalog-attached telemetry sessions now use the canonical driver/round as the toolbar label instead of exposing an opaque managed-storage/Asset filename when one source is attached.
+- Added launch-zero regression coverage and kept the raw logger clock immutable.
+
 ## v0.38.0-dev.8 — staged background sync + account/access UX
 
 - Reworked NHRA Tech Services season synchronization so it no longer blocks the desktop while every event is downloaded. Velocity now prioritizes the current event, or the most recently completed event when between races, refreshes the Run browser as soon as that first event is ready, and continues the rest of the season in a background Qt worker.

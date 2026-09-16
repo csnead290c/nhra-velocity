@@ -31,3 +31,12 @@ def test_standard_class_layout_is_one_core_waveform_not_many_panels():
     assert "for group_name, _roles in p.waveform_groups" not in block
     assert "ws.add_waveform()" in block
     assert "attach_shift_report" not in block
+
+
+def test_waveform_exposes_manual_launch_rezero_control():
+    source = Path(__file__).resolve().parents[1].joinpath('desktop.py').read_text(encoding='utf-8')
+    assert 'Set Cursor as Launch (T=0)' in source
+    assert 'Use Auto-Detected Launch' in source
+    assert 'Zero: Manual' in source
+    assert 'Refresh View' in source
+    assert 'Sync Tech Services' in source

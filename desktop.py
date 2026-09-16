@@ -45,7 +45,7 @@ from runlab.branding import PRODUCT_NAME, PRODUCT_VERSION
 from runlab.product_manifest import WORKBOOK_FORMAT_VERSION
 from runlab.importers import load_telemetry, apply_channel_overrides, CANONICAL_CHANNELS, telemetry_file_candidate
 from runlab.models import TelemetryRun, Environment, TimingData
-from runlab.telemetry import detect_drag_pass_window
+from runlab.telemetry import detect_drag_pass_window, launch_time_override, set_launch_time_override, clear_launch_time_override
 from runlab.audit import audit_run
 from runlab.alignment import estimate_time_alignment
 from runlab.math_channels import add_math_channel, reapply_math_channels
@@ -295,6 +295,7 @@ class RunBrowser(QtWidgets.QWidget):
     analysisCaseRequested = QtCore.Signal(str)
     attachTelemetryRequested = QtCore.Signal(str)
     runSelectionChanged = QtCore.Signal(str)
+    syncRequested = QtCore.Signal()
 
     def __init__(self, catalog: LocalCatalog):
         super().__init__(); self.catalog=catalog
@@ -303,13 +304,13 @@ class RunBrowser(QtWidgets.QWidget):
         self.tree=QtWidgets.QTreeWidget();self.tree.setHeaderLabels(['Run / Event','Driver','Class','Round','ET','MPH','Assets','Cached'])
         self.tree.setColumnWidth(0,235);self.tree.setColumnWidth(1,135);self.tree.setColumnWidth(2,120);self.tree.setColumnWidth(3,65);self.tree.setColumnWidth(4,62);self.tree.setColumnWidth(5,68);self.tree.setColumnWidth(6,55);self.tree.setColumnWidth(7,55)
         self.tree.setAlternatingRowColors(True);self.tree.itemDoubleClicked.connect(self._double);self.tree.currentItemChanged.connect(self._selection_changed);lay.addWidget(self.tree,1)
-        row=QtWidgets.QHBoxLayout();self.open_btn=QtWidgets.QPushButton('Open Run');self.attach_btn=QtWidgets.QPushButton('Attach Local Telemetry…');self.offline_btn=QtWidgets.QPushButton('Cache Offline');self.incident_btn=QtWidgets.QPushButton('New Analysis Case');self.refresh_btn=QtWidgets.QPushButton('Refresh')
+        row=QtWidgets.QHBoxLayout();self.open_btn=QtWidgets.QPushButton('Open Run');self.attach_btn=QtWidgets.QPushButton('Attach Local Telemetry…');self.offline_btn=QtWidgets.QPushButton('Cache Offline');self.incident_btn=QtWidgets.QPushButton('New Analysis Case');self.sync_btn=QtWidgets.QPushButton('Sync Tech Services');self.refresh_btn=QtWidgets.QPushButton('Refresh View')
         for b in (self.open_btn,self.attach_btn,self.offline_btn,self.incident_btn):row.addWidget(b)
-        row.addStretch(1);row.addWidget(self.refresh_btn);lay.addLayout(row)
+        row.addStretch(1);row.addWidget(self.sync_btn);row.addWidget(self.refresh_btn);lay.addLayout(row)
         note=QtWidgets.QLabel('Select an authoritative NHRA Tech Services Run, then attach telemetry manually for analysis. Local attachments are stored in Velocity and never uploaded or matched by filename; future server Asset support can replace this local bridge without changing Run identity.')
         note.setWordWrap(True);note.setStyleSheet('color:#aeb4bb;padding:2px');lay.addWidget(note)
         self.summary=QtWidgets.QLabel();self.summary.setStyleSheet('color:#aeb4bb;padding:2px');lay.addWidget(self.summary)
-        self.search.textChanged.connect(lambda _t:self.refresh());self.refresh_btn.clicked.connect(self.refresh)
+        self.search.textChanged.connect(lambda _t:self.refresh());self.sync_btn.clicked.connect(lambda _checked=False:self.syncRequested.emit());self.refresh_btn.clicked.connect(self.refresh)
         self.open_btn.clicked.connect(lambda:self._emit(self.openRunRequested));self.attach_btn.clicked.connect(lambda:self._emit(self.attachTelemetryRequested));self.offline_btn.clicked.connect(self._offline);self.incident_btn.clicked.connect(lambda:self._emit(self.analysisCaseRequested))
         self.refresh()
 
@@ -1257,6 +1258,12 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.bookmark_button = QtWidgets.QToolButton(); self.bookmark_button.setText("Bookmark")
         self.region_button = QtWidgets.QToolButton(); self.region_button.setText("Region A-B")
         self.fit_button = QtWidgets.QToolButton(); self.fit_button.setText("Fit Run"); self.fit_button.setToolTip("Fit the drag-racing pass (Ctrl+F)")
+        self.zero_button = QtWidgets.QToolButton(); self.zero_button.setText("Zero: Auto ▾"); self.zero_button.setToolTip("Set the current cursor position as launch (T=0), or return to automatic launch detection")
+        self.zero_button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        zero_menu = QtWidgets.QMenu(self.zero_button)
+        zero_menu.addAction("Set Cursor as Launch (T=0)", self._set_launch_zero_from_cursor)
+        zero_menu.addAction("Use Auto-Detected Launch", self._clear_launch_zero)
+        self.zero_button.setMenu(zero_menu)
         self.back_button = QtWidgets.QToolButton(); self.back_button.setText("◀ View"); self.back_button.setToolTip("Return to previous X-range")
         self.properties_button = QtWidgets.QToolButton(); self.properties_button.setText("Display…")
         self.snap_box = QtWidgets.QCheckBox("Snap cursors"); self.snap_box.setChecked(True)
@@ -1272,6 +1279,7 @@ class WaveformDisplay(QtWidgets.QWidget):
 
         ctl.addWidget(self.back_button)
         ctl.addWidget(self.fit_button)
+        ctl.addWidget(self.zero_button)
         self.more_button = QtWidgets.QToolButton()
         self.more_button.setText("More ▾")
         self.more_button.setToolTip('Left-click: Cursor   Shift+click: A   Ctrl+click: B')
@@ -1295,6 +1303,9 @@ class WaveformDisplay(QtWidgets.QWidget):
         more.addSeparator()
         more.addAction("Fit drag run", self._fit_run)
         more.addAction("Fit full logger recording", self._fit_full)
+        more.addSeparator()
+        more.addAction("Set Cursor as Launch (T=0)", self._set_launch_zero_from_cursor)
+        more.addAction("Use Auto-Detected Launch", self._clear_launch_zero)
         more.addSeparator()
         more.addAction("Display properties…", self._display_properties)
         self.more_button.setMenu(more)
@@ -1365,11 +1376,94 @@ class WaveformDisplay(QtWidgets.QWidget):
         cursors.cursorBMoved.connect(self._schedule_readout)
         cursors.rangeChanged.connect(self._external_range)
 
+    def _set_launch_zero_from_cursor(self):
+        handle = self.store.active
+        if handle is None:
+            return
+        mode = str(self.x_mode or '').strip().lower()
+        try:
+            if mode.startswith('logger'):
+                launch = float(self.cursors.x)
+            elif mode.startswith('time'):
+                current = detect_drag_pass_window(handle.run)
+                launch = float(current.launch_time_s) + float(self.cursors.x) - float(handle.time_alignment_s)
+            else:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    'Set Launch Zero',
+                    'Switch the X axis to Time from Launch or Logger Time, place the cursor at the true launch point, then choose Set Cursor as Launch (T=0).',
+                )
+                return
+            # Validate against the logger clock before persisting anything.
+            tc = handle.run.channel_map.get('time_s')
+            if tc and tc in handle.run.data.columns:
+                times = pd.to_numeric(handle.run.data[tc], errors='coerce').to_numpy(float)
+                finite = times[np.isfinite(times)]
+                if len(finite) and not (float(np.nanmin(finite)) <= launch <= float(np.nanmax(finite))):
+                    raise ValueError('Selected launch zero is outside the logger time range')
+            set_launch_time_override(handle.run, launch)
+            catalog = getattr(self.store, 'catalog', None)
+            if catalog is not None and handle.catalog_asset_id:
+                mapping = catalog.get_time_mapping(handle.catalog_asset_id) or {}
+                scale = float(mapping.get('scale') or 1.0)
+                catalog.update_time_mapping(
+                    handle.catalog_asset_id,
+                    scale=scale,
+                    offset_s=-scale * launch,
+                    method='manual launch zero',
+                    confidence=1.0,
+                    uncertainty_s=0.0,
+                    anchors=[{'asset_time_s': launch, 'run_time_s': 0.0}],
+                )
+            self.cursors.x = 0.0
+            self.store.changed.emit()
+            self.cursors.moved.emit(0.0)
+        except Exception as exc:
+            logging.exception('Could not set manual launch zero')
+            QtWidgets.QMessageBox.warning(self, 'Set Launch Zero', str(exc))
+
+    def _clear_launch_zero(self):
+        handle = self.store.active
+        if handle is None:
+            return
+        try:
+            clear_launch_time_override(handle.run)
+            detected = detect_drag_pass_window(handle.run)
+            catalog = getattr(self.store, 'catalog', None)
+            if catalog is not None and handle.catalog_asset_id:
+                mapping = catalog.get_time_mapping(handle.catalog_asset_id) or {}
+                scale = float(mapping.get('scale') or 1.0)
+                launch = float(detected.launch_time_s)
+                catalog.update_time_mapping(
+                    handle.catalog_asset_id,
+                    scale=scale,
+                    offset_s=-scale * launch,
+                    method=f'auto launch detection ({detected.confidence})',
+                    confidence=None,
+                    uncertainty_s=None,
+                    anchors=[],
+                )
+            self.cursors.x = 0.0
+            self.store.changed.emit()
+            self.cursors.moved.emit(0.0)
+        except Exception as exc:
+            logging.exception('Could not restore automatic launch zero')
+            QtWidgets.QMessageBox.warning(self, 'Launch Zero', str(exc))
+
+    def _refresh_zero_control(self):
+        manual = self.store.active is not None and launch_time_override(self.store.active.run) is not None
+        self.zero_button.setText('Zero: Manual ▾' if manual else 'Zero: Auto ▾')
+        if manual:
+            self.zero_button.setStyleSheet('font-weight:bold;')
+        else:
+            self.zero_button.setStyleSheet('')
+
     def _store_changed(self):
         # Run replacement, compare alignment, calculated-channel changes and
         # canonical remapping can all change display X/Y.  One invalidation here
         # keeps the hot cursor path simple and deterministic.
         self._data_cache.clear()
+        self._refresh_zero_control()
         self.refresh()
 
     def _schedule_readout(self, *_args):
@@ -3414,7 +3508,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tech_sync_user_initiated=False
         self.simulation_studies=[]
         self.compare_sets=CompareSetLibrary()
-        self.store=SessionStore(); self.cursors=CursorBus(); self.project_path:Optional[str]=None
+        self.store=SessionStore(); self.store.catalog=self.catalog; self.cursors=CursorBus(); self.project_path:Optional[str]=None
         self.analysis_library=DefinitionLibrary(name='Workbook Analysis Library'); self.store.analysis_library=self.analysis_library
         self.worksheets=QtWidgets.QTabWidget(); self.worksheets.setTabsClosable(True); self.worksheets.setMovable(True); self.setCentralWidget(self.worksheets)
         self.worksheets.tabCloseRequested.connect(self._close_sheet)
@@ -3531,6 +3625,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.run_browser.keepEventOfflineRequested.connect(self._keep_event_offline)
         self.run_browser.analysisCaseRequested.connect(self._create_analysis_case)
         self.run_browser.attachTelemetryRequested.connect(self._attach_local_telemetry_to_run)
+        self.run_browser.syncRequested.connect(self._sync_tech_services_data)
         run_dock=QtWidgets.QDockWidget('NHRA Tech Services Runs',self); run_dock.setObjectName('RunBrowserDock'); run_dock.setWidget(self.run_browser); self.addDockWidget(QtCore.Qt.LeftDockWidgetArea,run_dock)
         self.case_browser=AnalysisCaseBrowser(self.catalog);self.case_browser.openRunRequested.connect(self._open_catalog_run);self.case_browser.addSelectedRunRequested.connect(self._add_selected_run_to_case);self.case_browser.cacheCaseRequested.connect(self._cache_analysis_case)
         case_dock=QtWidgets.QDockWidget('Analysis Cases',self);case_dock.setObjectName('AnalysisCasesDock');case_dock.setWidget(self.case_browser);self.addDockWidget(QtCore.Qt.LeftDockWidgetArea,case_dock);self.tabifyDockWidget(run_dock,case_dock);run_dock.raise_()
@@ -4720,6 +4815,28 @@ class MainWindow(QtWidgets.QMainWindow):
         nh=self.store.add(outpath,scenario.run);nh.role='reference';nh.display_name=scenario.run.name
         self.store.changed.emit();self.statusBar().showMessage(f'Generated scratch compare session: {scenario.run.name}',7000)
 
+    @staticmethod
+    def _catalog_session_display_name(record: Dict[str, Any], asset_filename: str = '', *, multiple: bool = False) -> str:
+        parts=[]
+        driver=str(record.get('driver_name') or '').strip()
+        round_name=str(record.get('round') or '').strip()
+        if driver:parts.append(driver)
+        if round_name:parts.append(round_name)
+        if multiple and asset_filename:
+            parts.append(Path(asset_filename).stem)
+        return ' — '.join(parts) or Path(asset_filename).stem or str(record.get('run_key') or 'Run')
+
+    def _restore_catalog_launch_zero(self, handle: RunHandle) -> None:
+        if not handle.catalog_asset_id:
+            return
+        mapping=self.catalog.get_time_mapping(handle.catalog_asset_id)
+        if not mapping:
+            return
+        method=str(mapping.get('method') or '').lower()
+        scale=float(mapping.get('scale') or 1.0)
+        if method.startswith('manual launch zero') and abs(scale) > 1e-12:
+            set_launch_time_override(handle.run, -float(mapping.get('offset_s') or 0.0)/scale)
+
     def _attach_local_telemetry_to_selected_run(self):
         run_id=self.run_browser.selected_run_id() if hasattr(self,'run_browser') else ''
         if not run_id:
@@ -4765,7 +4882,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         continue
                     h=self.store.add(stored_path,run,activate=(opened==0))
                     h.catalog_run_id=run_id;h.catalog_asset_id=asset_id;h.catalog_session_id=session_id
-                    h.display_name=str(asset.get('filename') or Path(path).stem)
+                    h.display_name=self._catalog_session_display_name(record,str(asset.get('filename') or Path(path).name),multiple=(len(files)>1));self._restore_catalog_launch_zero(h)
                     opened+=1
                 except Exception as exc:
                     logging.exception('Could not attach telemetry %s to catalog run %s',path,run_id)
@@ -4848,7 +4965,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     session_id=self.catalog.ensure_telemetry_session(str(asset['id']),display_name=str(asset.get('filename') or Path(path).stem),vendor=run.vendor,channel_summary={'channels':len(run.data.columns),'canonical_roles':sorted(run.channel_map.keys())})
                     apply_catalog_run_authority(self.catalog,run_id,run)
                     run.metadata['catalog_asset_id']=asset['id'];run.metadata['catalog_telemetry_session_id']=session_id
-                    h=self.store.add(path,run,activate=(opened==0 and existing_count==0));h.catalog_run_id=run_id;h.catalog_asset_id=str(asset['id']);h.catalog_session_id=session_id;h.display_name=str(asset.get('filename') or Path(path).stem)
+                    h=self.store.add(path,run,activate=(opened==0 and existing_count==0));h.catalog_run_id=run_id;h.catalog_asset_id=str(asset['id']);h.catalog_session_id=session_id;h.display_name=self._catalog_session_display_name(record,str(asset.get('filename') or Path(path).name),multiple=(len(assets)>1));self._restore_catalog_launch_zero(h)
                     opened+=1
                 except Exception as exc:
                     logging.exception('Could not open catalog asset %s',asset.get('id'));errors.append(f"{asset.get('filename')}: {exc}")
@@ -5285,7 +5402,7 @@ class MainWindow(QtWidgets.QMainWindow):
             sessions.append({
                 'path':h.path,'display_name':h.display_name,'role':h.role,
                 'catalog_run_id':h.catalog_run_id,'catalog_asset_id':h.catalog_asset_id,'catalog_session_id':h.catalog_session_id,
-                'channel_overrides':h.channel_overrides,'unit_overrides':h.unit_overrides,'time_alignment_s':h.time_alignment_s,
+                'channel_overrides':h.channel_overrides,'unit_overrides':h.unit_overrides,'time_alignment_s':h.time_alignment_s,'launch_time_override_s':launch_time_override(h.run),
                 # Compatibility shadow. Durable values are moving to the
                 # catalog but retains them so pre-catalog workbooks remain portable.
                 'environment':h.run.environment.to_dict(),'timing':h.run.timing.to_dict(),
@@ -5411,6 +5528,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 h.run.metadata['user_notes']=rec.get('user_notes',''); h.run.metadata['annotations']=list(rec.get('annotations',[])); h.run.metadata['channel_aliases']=dict(rec.get('channel_aliases',{})); h.run.metadata['gates']=list(rec.get('gates',[]))
                 h.run.metadata['analysis_profile']=str(rec.get('analysis_profile','') or '')
                 h.run.metadata['rsa_profile_defaults']=dict(rec.get('rsa_profile_defaults',{}) or {})
+                if rec.get('launch_time_override_s') is not None:
+                    try:set_launch_time_override(h.run,float(rec.get('launch_time_override_s')))
+                    except Exception:logging.exception('Could not restore workbook launch zero')
+                elif h.catalog_asset_id:
+                    try:self._restore_catalog_launch_zero(h)
+                    except Exception:logging.exception('Could not restore catalog launch zero')
                 h.run.metadata['derived_analyses']=dict(rec.get('derived_analyses',{}))
                 dp=h.run.metadata.get('derived_analyses',{}).get('delivered_power',{})
                 if isinstance(dp,dict) and dp.get('enabled'):

@@ -88,3 +88,10 @@ Automated tests continue to cover:
 ## Remaining external validation
 
 This build still requires a real Windows Qt/pyqtgraph smoke test for the simplified toolbar, dock/tab arrangement, Essentials channel browser, and compact Run Workspace. The automated environment validates Python/data behavior and static UI contracts but does not prove Windows widget layout/painting.
+
+
+## v0.38.0-dev.9 validation
+
+- Added manual launch-zero regression tests covering detector override, Time-from-Launch waveform re-zero and raw Logger Time immutability.
+- Added UI/source-contract coverage for the visible Zero control plus explicit Sync Tech Services / Refresh View separation.
+- Full automated pytest suite passed: **227/227 tests** across three execution groups. Python compilation also passed before packaging the dev.9 bundle.

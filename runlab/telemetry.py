@@ -24,6 +24,62 @@ class PassWindow:
     confidence: str
 
 
+LAUNCH_OVERRIDE_KEY = "launch_time_override_s"
+
+
+def launch_time_override(run: TelemetryRun) -> Optional[float]:
+    """Return a user-selected logger-time launch zero, when present.
+
+    The override is display/analysis metadata only. Raw logger samples and the
+    authoritative NHRA timing record are never rewritten.
+    """
+    try:
+        value = float(run.metadata.get(LAUNCH_OVERRIDE_KEY))
+    except (TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) else None
+
+
+def set_launch_time_override(run: TelemetryRun, launch_time_s: float) -> float:
+    value = float(launch_time_s)
+    if not np.isfinite(value):
+        raise ValueError("Launch zero must be a finite logger time")
+    run.metadata[LAUNCH_OVERRIDE_KEY] = value
+    run.metadata["launch_zero_source"] = "manual"
+    return value
+
+
+def clear_launch_time_override(run: TelemetryRun) -> None:
+    run.metadata.pop(LAUNCH_OVERRIDE_KEY, None)
+    run.metadata.pop("launch_zero_source", None)
+
+
+def _apply_launch_override(run: TelemetryRun, window: PassWindow, t: np.ndarray, pre_samples: int) -> PassWindow:
+    override = launch_time_override(run)
+    if override is None or len(t) == 0:
+        return window
+    finite_idx = np.flatnonzero(np.isfinite(t))
+    if not len(finite_idx):
+        return window
+    tmin = float(np.nanmin(t[finite_idx])); tmax = float(np.nanmax(t[finite_idx]))
+    if override < tmin or override > tmax:
+        # A stale workbook/catalog override should not make an otherwise valid
+        # telemetry file unusable. Ignore it and retain the detected window.
+        return window
+    nearest = int(finite_idx[int(np.argmin(np.abs(t[finite_idx] - override)))])
+    launch_time = float(t[nearest])
+    start = max(0, nearest - int(pre_samples))
+    # A manual zero is an explicit engineering decision. Preserve the detected
+    # pass end/peak but never return an end before the selected launch.
+    end = max(int(window.end_index), nearest)
+    return PassWindow(
+        nearest, start, end,
+        launch_time, float(t[start]), float(t[end]),
+        int(window.peak_index), float(window.peak_time_s), window.peak_speed_mph,
+        f"manual launch zero ({window.method})", "Manual",
+    )
+
+
 def _finite_series(run: TelemetryRun, canonical: str) -> Optional[np.ndarray]:
     col = run.channel_map.get(canonical)
     if not col or col not in run.data.columns:
@@ -105,12 +161,12 @@ def detect_drag_pass_window(
             end = min(n - 1, max(e, peak_idx + post_samples))
             peak_speed = float(speed[peak_idx]) if np.isfinite(speed[peak_idx]) else None
             confidence = "High" if (peak_speed or 0) >= 50 else "Medium"
-            return PassWindow(
+            return _apply_launch_override(run, PassWindow(
                 launch, start, end,
                 float(t[launch]), float(t[start]), float(t[end]),
                 peak_idx, float(t[peak_idx]), peak_speed,
                 "vehicle speed excursion", confidence,
-            )
+            ), t, pre_samples)
 
     # Driveshaft fallback.  Select the excursion with the largest RPM peak.
     ds = _finite_series(run, "driveshaft_rpm")
@@ -127,12 +183,12 @@ def detect_drag_pass_window(
             launch = lo + int(stationary[-1]) if len(stationary) else s
             start = max(0, launch - pre_samples)
             end = min(n - 1, max(e, peak_idx + post_samples))
-            return PassWindow(
+            return _apply_launch_override(run, PassWindow(
                 launch, start, end,
                 float(t[launch]), float(t[start]), float(t[end]),
                 peak_idx, float(t[peak_idx]), None,
                 "driveshaft RPM excursion", "Medium",
-            )
+            ), t, pre_samples)
 
     throttle = _finite_series(run, "throttle_pct")
     if throttle is not None and np.isfinite(throttle).sum() >= 5:
@@ -144,18 +200,18 @@ def detect_drag_pass_window(
             start = max(0, launch - pre_samples)
             peak_idx = e
             end = min(n - 1, e + post_samples)
-            return PassWindow(
+            return _apply_launch_override(run, PassWindow(
                 launch, start, end,
                 float(t[launch]), float(t[start]), float(t[end]),
                 peak_idx, float(t[peak_idx]), None,
                 "wide-open-throttle excursion", "Low",
-            )
+            ), t, pre_samples)
 
     first = int(np.flatnonzero(np.isfinite(t))[0]) if np.isfinite(t).any() else 0
     last = int(np.flatnonzero(np.isfinite(t))[-1]) if np.isfinite(t).any() else n - 1
-    return PassWindow(
+    return _apply_launch_override(run, PassWindow(
         first, first, last,
         float(t[first]), float(t[first]), float(t[last]),
         first, float(t[first]), None,
         "full recording fallback", "Low",
-    )
+    ), t, pre_samples)
