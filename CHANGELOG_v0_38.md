@@ -121,3 +121,10 @@
 - Corrected Tech Services timing translation for 60 ft and 1000 ft values and added canonical 1000-ft MPH support to `TimingData`.
 - Re-opening an already-loaded catalog telemetry Asset now activates the existing session instead of duplicating it.
 - Application identity is now `NHRA.Velocity`; historical source/release records retain their original names.
+
+### v0.38.0-dev.13.1 — Windows startup hardening
+
+- Installs native/Python fault capture before `MainWindow` construction so `pythonw.exe` startup failures cannot vanish silently.
+- Wraps main-window construction and authentication startup in durable logging/error reporting.
+- The Windows dev launcher is replaced by a hidden, blocking WSH/CMD handoff so the application process is not orphaned by a short-lived terminal launcher.
+- Normal desktop launch remains console-free while launch/update diagnostics are written to the Velocity local app-data folder.

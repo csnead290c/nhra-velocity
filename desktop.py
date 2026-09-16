@@ -16,6 +16,7 @@ import logging
 import traceback
 import subprocess
 import time
+import faulthandler
 from datetime import date
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -6113,36 +6114,63 @@ def _style(app):
     ''')
 
 
+_FAULT_LOG_HANDLE = None
+
+
 def main():
+    global _FAULT_LOG_HANDLE
     log_path=configure_logging()
     logging.info('Starting %s %s; log=%s', PRODUCT_NAME, PRODUCT_VERSION, log_path)
+    # Install native/Python crash capture before any Qt widget is constructed.
+    # pythonw.exe has no console, so startup exceptions must never disappear.
+    try:
+        fault_path=log_dir()/'nhra-velocity-fault.log'
+        _FAULT_LOG_HANDLE=open(fault_path,'a',encoding='utf-8',buffering=1)
+        faulthandler.enable(file=_FAULT_LOG_HANDLE, all_threads=True)
+    except Exception:
+        logging.exception('Could not enable native fault logging')
+
     pg.setConfigOptions(antialias=False, background=(20,22,25), foreground=(215,215,215))
     app=QtWidgets.QApplication(sys.argv);app.setOrganizationName(APP_ORG);app.setApplicationName(APP_ID);_style(app)
-    win=MainWindow()
-    try:
-        win.auth.restore()
-    except Exception:
-        logging.exception('Could not restore secure Tech Services session')
-    win._refresh_account_actions()
-    if win.auth_required:
-        status=win.auth.status()
-        if not (status.online_access_valid or status.offline_access_valid):
-            if not win._sign_in():
-                QtWidgets.QMessageBox.critical(win,'NHRA Tech Services sign-in required',
-                    'This protected NHRA Velocity build requires an authorized NHRA Tech Services account.\n\n'
-                    'Sign-in was not completed, so the application will remain closed.')
-                return 4
-    win.show()
-    QtCore.QTimer.singleShot(250,win._maybe_start_initial_sync)
+    win_ref={'win':None}
+
     def _unhandled(exc_type, exc_value, exc_tb):
         logging.critical('Unhandled application exception', exc_info=(exc_type,exc_value,exc_tb))
         text=''.join(traceback.format_exception(exc_type,exc_value,exc_tb))
-        QtWidgets.QMessageBox.critical(win,'Unexpected application error',f'{exc_value}\n\nA diagnostic log was written to:\n{log_path}\n\n{text[-2500:]}')
+        parent=win_ref.get('win')
+        try:
+            QtWidgets.QMessageBox.critical(parent,'Unexpected application error',
+                f'{exc_value}\n\nA diagnostic log was written to:\n{log_path}\n\n{text[-2500:]}')
+        except Exception:
+            pass
     sys.excepthook=_unhandled
-    if len(sys.argv)>1:
-        paths=[p for p in sys.argv[1:] if Path(p).is_file()]
-        win._open_paths(paths)
-    sys.exit(app.exec())
+
+    try:
+        win=MainWindow()
+        win_ref['win']=win
+        try:
+            win.auth.restore()
+        except Exception:
+            logging.exception('Could not restore secure Tech Services session')
+        win._refresh_account_actions()
+        if win.auth_required:
+            status=win.auth.status()
+            if not (status.online_access_valid or status.offline_access_valid):
+                if not win._sign_in():
+                    QtWidgets.QMessageBox.critical(win,'NHRA Tech Services sign-in required',
+                        'This protected NHRA Velocity build requires an authorized NHRA Tech Services account.\n\n'
+                        'Sign-in was not completed, so the application will remain closed.')
+                    return 4
+        win.show()
+        QtCore.QTimer.singleShot(250,win._maybe_start_initial_sync)
+        if len(sys.argv)>1:
+            paths=[p for p in sys.argv[1:] if Path(p).is_file()]
+            win._open_paths(paths)
+        return app.exec()
+    except Exception:
+        exc_type,exc_value,exc_tb=sys.exc_info()
+        _unhandled(exc_type,exc_value,exc_tb)
+        return 1
 
 
-if __name__=='__main__': main()
+if __name__=='__main__': sys.exit(main())
