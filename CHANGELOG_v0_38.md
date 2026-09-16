@@ -1,3 +1,12 @@
+## v0.38.0-dev.13 — statistics, channel control, analysis consistency, exact re-zero
+
+- Added ATLAS-style **reference-to-live-cursor statistics** directly to waveform band headers. The new **Stats** menu exposes Delta, Minimum, Maximum, Mean and Standard Deviation, with `E/M/X/N/Q` shortcuts and a one-click clear action.
+- Statistics use the same red Reference cursor (`R`) and live engineering cursor as the waveform, so the shaded reference region, header statistics, Cursor Region Statistics display and reference-limited spectrum analysis all share one analysis window.
+- Added practical channel removal/reordering: right-click a waveform band, **More → Remove channel**, or right-click a Channel Explorer item to remove it from the active waveform.
+- Reworked Region Statistics and reference-limited FFT/PSD from the legacy A/B cursor pair to the visible Reference→Cursor model.
+- Hardened manual launch re-zero: the selected displayed cursor position is first converted back to logger time, snapped to the effective logger sample, persisted as that exact sample, and any display-only alignment is cleared. Reference/B cursor positions are translated so they remain on the same physical samples.
+- Added focused UI/source contract coverage for waveform statistics, channel management, quick-analysis construction and repeat manual re-zero.
+
 # NHRA Velocity v0.38 development
 
 ## v0.38.0-dev.12 — live cursor readout + durable Run data + event scope fix

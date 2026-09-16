@@ -1,12 +1,21 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.12**
+Validated build: **0.38.0-dev.13**
 
 ## Scope
 
 This validation covers the dev.12 live cursor/readout, managed Run-data reopen, and current/latest-completed event-selection fixes on top of the dev.11 ATLAS-style waveform interaction and workbook-shell usability pass, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
 
 ## Results
+
+## dev.13 analysis/workflow hardening
+
+- Non-Qt automated suite: **241/241 passed** in two batches; the additional offscreen Qt smoke module is skipped in this Linux validation environment when PySide6 is unavailable.
+- Focused dev.13 contract/smoke coverage passed where runtime dependencies were available, covering statistics toggles, channel removal, reference-to-live-cursor analysis semantics and repeated launch re-zero.
+- `python -m compileall -q desktop.py runlab` passed.
+- Manual re-zero now clears display-only alignment and persists the effective snapped logger sample, preventing the apparent first-use offset seen in dev.12.
+- Legacy A/B analysis consumers used by Region Statistics and reference-limited Spectrum now follow the visible Reference→Cursor region.
+
 
 - Full automated suite completed **238/238 tests** (99 + 139 in two groups to stay below the execution wall-clock limit).
 - `python -m py_compile desktop.py` passed.

@@ -1096,6 +1096,7 @@ class ChannelTree(QtWidgets.QTreeWidget):
     channelAliasRequested = QtCore.Signal(str)
     channelFavoriteRequested = QtCore.Signal(str, bool)
     calculatedChannelDeleteRequested = QtCore.Signal(str)
+    channelRemoveRequested = QtCore.Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -1166,7 +1167,7 @@ class ChannelTree(QtWidgets.QTreeWidget):
         if not item:return
         name=item.data(0,QtCore.Qt.UserRole)
         if not name:return
-        menu=QtWidgets.QMenu(self); props=menu.addAction("Channel Properties…"); alias=menu.addAction("Set Alias…"); add=menu.addAction("Add to active waveform")
+        menu=QtWidgets.QMenu(self); props=menu.addAction("Channel Properties…"); alias=menu.addAction("Set Alias…"); add=menu.addAction("Add to active waveform"); remove=menu.addAction("Remove from active waveform")
         pref=get_channel_preference(self._run,str(name)) if self._run is not None else {}
         favorite=bool(pref.get('favorite',False))
         fav_action=menu.addAction('Remove from Favorites' if favorite else 'Add to Favorites')
@@ -1177,6 +1178,7 @@ class ChannelTree(QtWidgets.QTreeWidget):
         if chosen==props:self.channelPropertiesRequested.emit(str(name))
         elif chosen==alias:self.channelAliasRequested.emit(str(name))
         elif chosen==add:self.channelActivated.emit(str(name))
+        elif chosen==remove:self.channelRemoveRequested.emit(str(name))
         elif chosen==fav_action:self.channelFavoriteRequested.emit(str(name),not favorite)
         elif delete_math is not None and chosen==delete_math:self.calculatedChannelDeleteRequested.emit(str(name))
 
@@ -1386,6 +1388,24 @@ class WaveformDisplay(QtWidgets.QWidget):
         ctl.addWidget(self.back_button)
         ctl.addWidget(self.fit_button)
         ctl.addWidget(self.zero_button)
+        self.stats_button = QtWidgets.QToolButton(); self.stats_button.setText("Stats ▾")
+        self.stats_button.setToolTip("Reference-to-cursor statistics: Delta / Min / Max / Mean / Std. Press R to place the reference cursor.")
+        self.stats_button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        stats_menu = QtWidgets.QMenu(self.stats_button)
+        self._header_stat_actions = {}
+        for label, attr, shortcut in [
+            ('Delta vs Ref', 'show_stat_delta', 'E'),
+            ('Minimum', 'show_stat_min', 'M'),
+            ('Maximum', 'show_stat_max', 'X'),
+            ('Mean', 'show_stat_mean', 'N'),
+            ('Std dev', 'show_stat_std', 'Q'),
+        ]:
+            action = stats_menu.addAction(label); action.setCheckable(True); action.setChecked(bool(getattr(self, attr))); action.setShortcut(shortcut)
+            action.toggled.connect(lambda checked, a=attr: self._set_readout_stat(a, checked))
+            self._header_stat_actions[attr] = action
+        stats_menu.addSeparator(); stats_menu.addAction('Clear statistics', self._clear_header_statistics)
+        self.stats_button.setMenu(stats_menu); self._update_stats_button()
+        ctl.addWidget(self.stats_button)
         self.more_button = QtWidgets.QToolButton()
         self.more_button.setText("More ▾")
         self.more_button.setToolTip('Click: Cursor   Drag cursor line: scrub   Shift+click: A   Ctrl+click: B   Wheel: zoom X')
@@ -1419,6 +1439,8 @@ class WaveformDisplay(QtWidgets.QWidget):
         more.addAction("Set Cursor as Launch (T=0)", self._set_launch_zero_from_cursor)
         more.addAction("Use Auto-Detected Launch", self._clear_launch_zero)
         more.addSeparator()
+        self.remove_channel_menu = more.addMenu("Remove channel")
+        self.remove_channel_menu.aboutToShow.connect(self._populate_remove_channel_menu)
         more.addAction("Display properties…", self._display_properties)
         self.more_button.setMenu(more)
         ctl.addWidget(self.more_button)
@@ -1473,8 +1495,10 @@ class WaveformDisplay(QtWidgets.QWidget):
         # ATLAS-style cursor surface: click positions the shared cursor and the
         # vertical cursor line itself is draggable. Merely hovering over a
         # waveform never changes engineering state. Shift/Ctrl click place A/B.
-        self.graph.setToolTip('Click or left-drag: move cursor   R: reference cursor   +/-: zoom X   Middle-drag: pan X   Wheel: zoom X')
+        self.graph.setToolTip('Click or left-drag: move cursor   R: reference cursor   M/X/N/Q/E: statistics   Right-click: channel actions   +/-: zoom X   Middle-drag: pan X   Wheel: zoom X')
         self.graph.scene().sigMouseClicked.connect(self._scene_mouse_clicked)
+        self.graph.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.graph.customContextMenuRequested.connect(self._waveform_context_menu)
         self._install_waveform_shortcuts()
 
         # Cursor readout is also coalesced.  Signals can still move cursor lines
@@ -1515,8 +1539,67 @@ class WaveformDisplay(QtWidgets.QWidget):
         self._bind_waveform_shortcut('+', lambda: self._zoom_x(0.70))
         self._bind_waveform_shortcut('=', lambda: self._zoom_x(0.70))
         self._bind_waveform_shortcut('-', lambda: self._zoom_x(1.40))
+        self._bind_waveform_shortcut('M', lambda: self._toggle_stat_shortcut('show_stat_min'))
+        self._bind_waveform_shortcut('X', lambda: self._toggle_stat_shortcut('show_stat_max'))
+        self._bind_waveform_shortcut('N', lambda: self._toggle_stat_shortcut('show_stat_mean'))
+        self._bind_waveform_shortcut('E', lambda: self._toggle_stat_shortcut('show_stat_delta'))
+        self._bind_waveform_shortcut('Q', lambda: self._toggle_stat_shortcut('show_stat_std'))
         self._bind_waveform_shortcut('Ctrl+Z', self._previous_view)
         self._bind_waveform_shortcut('Ctrl+Alt+Z', self._fit_run)
+
+    def _toggle_stat_shortcut(self, attr: str):
+        self._set_readout_stat(attr, not bool(getattr(self, attr, False)))
+
+    def _clear_header_statistics(self):
+        for attr in ('show_stat_delta','show_stat_min','show_stat_max','show_stat_mean','show_stat_std'):
+            setattr(self, attr, False)
+        self._set_stat_column_visibility(); self._update_stats_button(); self._refresh_readout()
+
+    def _populate_remove_channel_menu(self):
+        self.remove_channel_menu.clear()
+        if not self.channels:
+            action=self.remove_channel_menu.addAction('(no channels)'); action.setEnabled(False); return
+        for channel in list(self.channels):
+            self.remove_channel_menu.addAction(str(channel), lambda checked=False, c=channel: self.remove_channel(c))
+
+    def _plot_at_widget_pos(self, pos):
+        try:
+            scene_pos=self.graph.mapToScene(pos)
+        except Exception:
+            return None
+        for plot, _item, chans in self._plot_headers:
+            try:
+                if plot.sceneBoundingRect().contains(scene_pos):
+                    return plot, list(chans)
+            except Exception:
+                continue
+        return None
+
+    def _waveform_context_menu(self, pos):
+        hit=self._plot_at_widget_pos(pos)
+        menu=QtWidgets.QMenu(self)
+        channels=list(hit[1]) if hit else list(self.channels)
+        if len(channels)==1:
+            channel=channels[0]
+            menu.addAction(f'Remove {channel}', lambda: self.remove_channel(channel))
+            menu.addAction(f'Trace properties — {channel}…', lambda: self._trace_properties(channel))
+            idx=self.channels.index(channel) if channel in self.channels else -1
+            if idx>0: menu.addAction('Move channel up', lambda c=channel: self._move_channel(c,-1))
+            if 0<=idx<len(self.channels)-1: menu.addAction('Move channel down', lambda c=channel: self._move_channel(c,1))
+        elif channels:
+            remove_menu=menu.addMenu('Remove channel')
+            for channel in channels:
+                remove_menu.addAction(str(channel), lambda checked=False, c=channel: self.remove_channel(c))
+        menu.addSeparator()
+        menu.addAction('Set reference at cursor (R)', self._set_a_from_cursor)
+        menu.addAction('Set cursor as Launch (T=0)', self._set_launch_zero_from_cursor)
+        menu.exec(self.graph.mapToGlobal(pos))
+
+    def _move_channel(self, channel: str, direction: int):
+        if channel not in self.channels:return
+        i=self.channels.index(channel);j=max(0,min(len(self.channels)-1,i+int(direction)))
+        if i==j:return
+        self.channels[i],self.channels[j]=self.channels[j],self.channels[i];self.refresh()
 
     def _cursor_dragged(self, x: float):
         # Left-drag anywhere in a waveform is the primary engineering cursor
@@ -1575,10 +1658,17 @@ class WaveformDisplay(QtWidgets.QWidget):
                     f"&nbsp;<span style='color:#f2f2f2'>{current_text}{unit_text}</span>"
                 )
                 if self.reference_visible:
-                    chunk += (
-                        f"&nbsp;&nbsp;<span style='color:#ff6b6b'>R {self._fmt_cursor_value(ref)}</span>"
-                        f"&nbsp;<span style='color:#b8bec6'>Δ {self._fmt_cursor_value(delta)}</span>"
-                    )
+                    chunk += f"&nbsp;&nbsp;<span style='color:#ff6b6b'>R {self._fmt_cursor_value(ref)}</span>"
+                    if self.show_stat_delta:
+                        chunk += f"&nbsp;<span style='color:#b8bec6'>Δ {self._fmt_cursor_value(delta)}</span>"
+                    if self.show_stat_min or self.show_stat_max or self.show_stat_mean or self.show_stat_std:
+                        stats=self._data_cache.region_summary(handle.run,channel,self.cursors.a,self.cursors.x,self.x_mode,handle.time_alignment_s)
+                        stat_raw=np.asarray([stats.get('min',np.nan),stats.get('max',np.nan),stats.get('mean',np.nan),stats.get('std',np.nan)],dtype=float)
+                        stat_vals=self._convert_for_display(channel,handle.run,stat_raw)
+                        if self.show_stat_min: chunk += f"&nbsp;<span style='color:#d0d4da'>Min {self._fmt_cursor_value(stat_vals[0])}</span>"
+                        if self.show_stat_max: chunk += f"&nbsp;<span style='color:#d0d4da'>Max {self._fmt_cursor_value(stat_vals[1])}</span>"
+                        if self.show_stat_mean: chunk += f"&nbsp;<span style='color:#d0d4da'>Avg {self._fmt_cursor_value(stat_vals[2])}</span>"
+                        if self.show_stat_std: chunk += f"&nbsp;<span style='color:#d0d4da'>σ {self._fmt_cursor_value(stat_vals[3])}</span>"
                 chunks.append(chunk)
             try:
                 item.setHtml("&nbsp;&nbsp;&nbsp;&nbsp;".join(chunks))
@@ -1592,11 +1682,17 @@ class WaveformDisplay(QtWidgets.QWidget):
             return
         mode = str(self.x_mode or '').strip().lower()
         try:
+            selected_x=float(self.cursors.x)
+            current = detect_drag_pass_window(handle.run)
+            old_launch=float(current.launch_time_s)
+            old_alignment=float(handle.time_alignment_s)
             if mode.startswith('logger'):
-                launch = float(self.cursors.x)
+                selected_logger_time=selected_x
             elif mode.startswith('time'):
-                current = detect_drag_pass_window(handle.run)
-                launch = float(current.launch_time_s) + float(self.cursors.x) - float(handle.time_alignment_s)
+                # Display X = logger time - current launch + compare alignment.
+                # Convert the selected display coordinate back to the logger clock
+                # before changing either launch zero or alignment.
+                selected_logger_time=old_launch + selected_x - old_alignment
             else:
                 QtWidgets.QMessageBox.information(
                     self,
@@ -1604,14 +1700,38 @@ class WaveformDisplay(QtWidgets.QWidget):
                     'Switch the X axis to Time from Launch or Logger Time, place the cursor at the true launch point, then choose Set Cursor as Launch (T=0).',
                 )
                 return
-            # Validate against the logger clock before persisting anything.
+
             tc = handle.run.channel_map.get('time_s')
             if tc and tc in handle.run.data.columns:
                 times = pd.to_numeric(handle.run.data[tc], errors='coerce').to_numpy(float)
                 finite = times[np.isfinite(times)]
-                if len(finite) and not (float(np.nanmin(finite)) <= launch <= float(np.nanmax(finite))):
+                if len(finite) and not (float(np.nanmin(finite)) <= selected_logger_time <= float(np.nanmax(finite))):
                     raise ValueError('Selected launch zero is outside the logger time range')
-            set_launch_time_override(handle.run, launch)
+
+            old_ref=float(self.cursors.a); old_b=float(self.cursors.b)
+            set_launch_time_override(handle.run, selected_logger_time)
+            # detect_drag_pass_window snaps a manual zero to the nearest physical
+            # logger sample. Persist that effective value so display and catalog
+            # cannot disagree by a sample interval after reopening.
+            effective=float(detect_drag_pass_window(handle.run).launch_time_s)
+            set_launch_time_override(handle.run, effective)
+
+            # A compare/display alignment intentionally moves a trace relative to
+            # T=0. If it remains non-zero, a user-selected launch can appear offset
+            # even though the launch override itself is correct. Explicit re-zero
+            # makes the selected point authoritative and clears that display-only
+            # alignment. Preserve reference/B on the same physical samples.
+            handle.time_alignment_s=0.0
+            if mode.startswith('time'):
+                coordinate_shift=old_launch - effective - old_alignment
+                self.cursors.a=old_ref + coordinate_shift
+                self.cursors.b=old_b + coordinate_shift
+                target_cursor=0.0
+            else:
+                # Logger Time is an absolute logger clock and must not be
+                # translated just because the launch reference changed.
+                target_cursor=selected_logger_time
+
             catalog = getattr(self.store, 'catalog', None)
             if catalog is not None and handle.catalog_asset_id:
                 mapping = catalog.get_time_mapping(handle.catalog_asset_id) or {}
@@ -1619,15 +1739,23 @@ class WaveformDisplay(QtWidgets.QWidget):
                 catalog.update_time_mapping(
                     handle.catalog_asset_id,
                     scale=scale,
-                    offset_s=-scale * launch,
+                    offset_s=-scale * effective,
                     method='manual launch zero',
                     confidence=1.0,
                     uncertainty_s=0.0,
-                    anchors=[{'asset_time_s': launch, 'run_time_s': 0.0}],
+                    anchors=[{'asset_time_s': effective, 'run_time_s': 0.0}],
                 )
-            self.cursors.x = 0.0
+            self.cursors.x = float(target_cursor)
+            self._data_cache.clear()
             self.store.changed.emit()
-            self.cursors.moved.emit(0.0)
+            self.cursors.cursorAMoved.emit(self.cursors.a)
+            self.cursors.cursorBMoved.emit(self.cursors.b)
+            self.cursors.moved.emit(self.cursors.x)
+            msg=f'Launch zero set at logger {effective:.6f} s'
+            if abs(old_alignment)>1e-9:
+                msg += f' · cleared {old_alignment:+.4f} s display alignment'
+            win=self.window(); status=getattr(win,'statusBar',None)
+            if callable(status): status().showMessage(msg,6000)
         except Exception as exc:
             logging.exception('Could not set manual launch zero')
             QtWidgets.QMessageBox.warning(self, 'Set Launch Zero', str(exc))
@@ -1889,7 +2017,17 @@ class WaveformDisplay(QtWidgets.QWidget):
         if not hasattr(self,attr):
             return
         setattr(self,attr,bool(visible))
-        self._set_stat_column_visibility();self._refresh_readout()
+        self._set_stat_column_visibility(); self._update_stats_button(); self._refresh_readout()
+
+    def _update_stats_button(self):
+        if not hasattr(self,'stats_button'):return
+        labels=[]
+        if self.show_stat_delta:labels.append('Δ')
+        if self.show_stat_min:labels.append('Min')
+        if self.show_stat_max:labels.append('Max')
+        if self.show_stat_mean:labels.append('Avg')
+        if self.show_stat_std:labels.append('σ')
+        self.stats_button.setText(('Stats: '+','.join(labels)+' ▾') if labels else 'Stats ▾')
 
     def _set_stat_column_visibility(self):
         # Fixed table columns: Δ=4 Min=5 Max=6 Mean=7 Std=8 B=9.
@@ -1899,9 +2037,11 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.readout.setColumnHidden(7,not self.show_stat_mean)
         self.readout.setColumnHidden(8,not self.show_stat_std)
         self.readout.setColumnHidden(9,not self.show_ab_cursors)
-        for attr,action in getattr(self,'_readout_stat_actions',{}).items():
-            wanted=bool(getattr(self,attr))
-            if action.isChecked()!=wanted:action.setChecked(wanted)
+        for action_map in (getattr(self,'_readout_stat_actions',{}), getattr(self,'_header_stat_actions',{})):
+            for attr,action in action_map.items():
+                wanted=bool(getattr(self,attr))
+                if action.isChecked()!=wanted:
+                    action.blockSignals(True); action.setChecked(wanted); action.blockSignals(False)
 
     def _toggle_reference_cursor(self):
         # ATLAS-style R shortcut: adding a reference captures the current
@@ -2651,14 +2791,14 @@ class SpectrumDisplay(QtWidgets.QWidget):
         lay=QtWidgets.QVBoxLayout(self); lay.setContentsMargins(0,0,0,0)
         ctl=QtWidgets.QHBoxLayout(); self.channel=QtWidgets.QComboBox(); self.mode=QtWidgets.QComboBox(); self.mode.addItems(['FFT Amplitude','PSD (Welch)','Spectrogram']); self.window=QtWidgets.QComboBox(); self.window.addItems(['hann','hamming','blackman','boxcar'])
         self.maxfreq=QtWidgets.QDoubleSpinBox(); self.maxfreq.setRange(0.1,50000); self.maxfreq.setValue(500); self.maxfreq.setDecimals(1); self.maxfreq.setSuffix(' Hz')
-        self.logy=QtWidgets.QCheckBox('Log amplitude'); self.use_ab=QtWidgets.QCheckBox('A-B only')
+        self.logy=QtWidgets.QCheckBox('Log amplitude'); self.use_ab=QtWidgets.QCheckBox('Reference-to-cursor only')
         ctl.addWidget(QtWidgets.QLabel('Channel'));ctl.addWidget(self.channel,1);ctl.addWidget(QtWidgets.QLabel('Mode'));ctl.addWidget(self.mode);ctl.addWidget(QtWidgets.QLabel('Window'));ctl.addWidget(self.window);ctl.addWidget(QtWidgets.QLabel('Max'));ctl.addWidget(self.maxfreq);ctl.addWidget(self.logy);ctl.addWidget(self.use_ab)
         lay.addLayout(ctl)
         self.stats=QtWidgets.QLabel('Select a channel with a valid timebase.'); self.stats.setWordWrap(True); lay.addWidget(self.stats)
         self.plot=pg.PlotWidget(background=(20,22,25)); self.plot.showGrid(x=True,y=True,alpha=.15); lay.addWidget(self.plot,1)
         self.channel.currentTextChanged.connect(self.refresh); self.mode.currentTextChanged.connect(self.refresh); self.window.currentTextChanged.connect(self.refresh); self.maxfreq.valueChanged.connect(self.refresh); self.logy.toggled.connect(self.refresh); self.use_ab.toggled.connect(self.refresh)
         if self.cursors is not None:
-            self.cursors.cursorAMoved.connect(lambda _x:self.refresh() if self.use_ab.isChecked() else None); self.cursors.cursorBMoved.connect(lambda _x:self.refresh() if self.use_ab.isChecked() else None)
+            self.cursors.cursorAMoved.connect(lambda _x:self.refresh() if self.use_ab.isChecked() else None); self.cursors.moved.connect(lambda _x:self.refresh() if self.use_ab.isChecked() else None)
         store.activeChanged.connect(lambda _h:self.populate()); store.changed.connect(self._store_changed); self.populate()
     def _store_changed(self):
         current=self.channel.currentText(); self.populate(current)
@@ -2678,12 +2818,12 @@ class SpectrumDisplay(QtWidgets.QWidget):
         try:
             x,y=channel_xy(h.run,name,'Logger Time',0.0)
             if self.use_ab.isChecked():
-                if self.cursors is None: raise ValueError('A-B spectrum is unavailable without worksheet cursors.')
+                if self.cursors is None: raise ValueError('Reference-to-cursor spectrum is unavailable without worksheet cursors.')
                 region_x,region_y=channel_xy(h.run,name,self.x_mode,h.time_alignment_s)
                 n=min(len(x),len(y),len(region_x),len(region_y)); x=x[:n];y=y[:n];region_x=region_x[:n]
-                a=min(float(self.cursors.a),float(self.cursors.b)); b=max(float(self.cursors.a),float(self.cursors.b))
+                a=min(float(self.cursors.a),float(self.cursors.x)); b=max(float(self.cursors.a),float(self.cursors.x))
                 keep=np.isfinite(x)&np.isfinite(y)&np.isfinite(region_x)&(region_x>=a)&(region_x<=b)
-                if int(keep.sum())<8: raise ValueError('A-B region contains too few samples for FFT.')
+                if int(keep.sum())<8: raise ValueError('Reference-to-cursor region contains too few samples for FFT.')
                 x=np.asarray(x[keep],float);y=np.asarray(y[keep],float)
             if self.mode.currentText().startswith('Spectrogram'):
                 result=spectrogram(x,y,max_frequency_hz=float(self.maxfreq.value()),window=self.window.currentText())
@@ -3013,14 +3153,14 @@ class RegionStatisticsDisplay(QtWidgets.QTableWidget):
         self.headers=['Channel','Unit','Samples','Start','End','Δ','Min','Max','Mean','Median','Std','RMS']
         self.setColumnCount(len(self.headers)); self.setHorizontalHeaderLabels(self.headers); self.setAlternatingRowColors(True); self.setSortingEnabled(False)
         self.horizontalHeader().setStretchLastSection(True)
-        cursors.cursorAMoved.connect(lambda _x:self.refresh()); cursors.cursorBMoved.connect(lambda _x:self.refresh()); store.activeChanged.connect(lambda _h:self.refresh()); store.changed.connect(self.refresh)
+        cursors.cursorAMoved.connect(lambda _x:self.refresh()); cursors.moved.connect(lambda _x:self.refresh()); store.activeChanged.connect(lambda _h:self.refresh()); store.changed.connect(self.refresh)
         self.refresh()
     def refresh(self):
         h=self.store.active; channels=self.waveform.channels if (h and self.waveform) else []
         self.setRowCount(0)
         if not h or not channels:return
         mode=self.waveform.x_mode if self.waveform else 'Time from Launch'
-        rows=region_statistics(h.run,channels,self.cursors.a,self.cursors.b,x_mode=mode,alignment_s=h.time_alignment_s)
+        rows=region_statistics(h.run,channels,self.cursors.a,self.cursors.x,x_mode=mode,alignment_s=h.time_alignment_s)
         self.setRowCount(len(rows))
         for r,row in enumerate(rows):
             unit=display_label(self.waveform._display_unit(row['channel'],h.run) if self.waveform else h.run.units.get(row['channel'],''))
@@ -3526,7 +3666,7 @@ class Worksheet(QtWidgets.QMainWindow):
         return self._dock('Gauge / Status',GaugeDisplay(self.store,self.cursors),QtCore.Qt.RightDockWidgetArea,display_type='gauge',object_name=object_name)
     def add_region_stats(self, object_name=None):
         w=self.waveforms[0] if self.waveforms else None
-        return self._dock('A-B Region Statistics',RegionStatisticsDisplay(self.store,self.cursors,w),QtCore.Qt.BottomDockWidgetArea,display_type='region_stats',object_name=object_name)
+        return self._dock('Cursor Region Statistics',RegionStatisticsDisplay(self.store,self.cursors,w),QtCore.Qt.BottomDockWidgetArea,display_type='region_stats',object_name=object_name)
     def add_scatter(self, object_name=None):
         return self._dock('Scatter',ScatterDisplay(self.store),QtCore.Qt.RightDockWidgetArea,display_type='scatter',object_name=object_name)
     def add_histogram(self, object_name=None):
@@ -3836,7 +3976,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.a_wave=QtGui.QAction('Waveform Display',self); self.a_wave.triggered.connect(lambda:self.current_sheet().add_waveform())
         self.a_values=QtGui.QAction('Values Display',self); self.a_values.triggered.connect(lambda:self.current_sheet().add_values())
         self.a_gauge=QtGui.QAction('Gauge / Status Display',self); self.a_gauge.triggered.connect(lambda:self.current_sheet().add_gauge())
-        self.a_region_stats=QtGui.QAction('A-B Region Statistics',self); self.a_region_stats.setShortcut('Ctrl+Shift+R'); self.a_region_stats.triggered.connect(lambda:self.current_sheet().add_region_stats())
+        self.a_region_stats=QtGui.QAction('Cursor Region Statistics',self); self.a_region_stats.setShortcut('Ctrl+Shift+R'); self.a_region_stats.triggered.connect(lambda:self.current_sheet().add_region_stats())
         self.a_scatter=QtGui.QAction('Scatter Display',self); self.a_scatter.triggered.connect(lambda:self.current_sheet().add_scatter())
         self.a_hist=QtGui.QAction('Histogram Display',self); self.a_hist.triggered.connect(lambda:self.current_sheet().add_histogram())
         self.a_spectrum=QtGui.QAction('FFT / PSD Spectrum Display',self); self.a_spectrum.triggered.connect(lambda:self.current_sheet().add_spectrum())
@@ -3928,7 +4068,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.channel_search=QtWidgets.QLineEdit(); self.channel_search.setPlaceholderText('Search channels…  (Ctrl+P)')
         filter_row.addWidget(self.channel_scope);filter_row.addWidget(self.channel_search,1);v.addLayout(filter_row)
         self.search_shortcut=QtGui.QShortcut(QtGui.QKeySequence('Ctrl+P'), self); self.search_shortcut.activated.connect(self._focus_parameter_search); self.quick_access_shortcut=QtGui.QShortcut(QtGui.QKeySequence('Ctrl+Q'),self); self.quick_access_shortcut.activated.connect(self._focus_parameter_search)
-        self.channels=ChannelTree(); self.channels.channelActivated.connect(self._channel_add); self.channels.channelPropertiesRequested.connect(self._channel_properties); self.channels.channelAliasRequested.connect(self._set_channel_alias); self.channels.channelFavoriteRequested.connect(self._set_channel_favorite); self.channels.calculatedChannelDeleteRequested.connect(self._delete_math_channel); v.addWidget(self.channels,1)
+        self.channels=ChannelTree(); self.channels.channelActivated.connect(self._channel_add); self.channels.channelRemoveRequested.connect(self._channel_remove); self.channels.channelPropertiesRequested.connect(self._channel_properties); self.channels.channelAliasRequested.connect(self._set_channel_alias); self.channels.channelFavoriteRequested.connect(self._set_channel_favorite); self.channels.calculatedChannelDeleteRequested.connect(self._delete_math_channel); v.addWidget(self.channels,1)
         self.channel_search.textChanged.connect(lambda _t:self._refresh_channel_explorer());self.channel_scope.currentIndexChanged.connect(lambda _i:self._refresh_channel_explorer())
         params_dock=QtWidgets.QDockWidget('Channel Explorer',self); params_dock.setObjectName('ParametersDock'); params_dock.setWidget(chwrap); self.addDockWidget(QtCore.Qt.LeftDockWidgetArea,params_dock)
         # Run selection and channel selection are the two ordinary entry points;
@@ -4005,7 +4145,9 @@ class MainWindow(QtWidgets.QMainWindow):
         m=self.menuBar().addMenu('&Data'); m.addAction('Run Details / Setup…',lambda:self.metadata.setFocus()); m.addAction(self.a_math); m.addAction(self.a_gate); libm=m.addMenu('Analysis Definition Library'); [libm.addAction(a) for a in (self.a_library_import,self.a_library_export,self.a_library_capture,self.a_library_constant,self.a_library_metric,self.a_library_segment,self.a_library_condition,self.a_library_event_rule,self.a_library_report)]; m.addSeparator(); m.addAction(self.a_site_sync); m.addAction(self.a_attach_selected_run); m.addAction(self.a_keep_offline); m.addAction(self.a_capture_snapshot); m.addAction(self.a_history); m.addSeparator(); m.addAction(self.a_apply_sync)
         m.addAction('Data Integrity Audit…',self._show_audit); m.addAction(self.a_sensor_health)
         m=self.menuBar().addMenu('&Analysis')
-        m.addAction(self.a_shift_report); m.addSeparator(); m.addAction(self.a_spectrum); m.addAction(self.a_load_map); m.addAction(self.a_metric_report); m.addAction(self.a_saved_report); m.addAction(self.a_saved_trend); m.addAction(self.a_strip_model); m.addAction(self.a_envelope); m.addAction(self.a_comparison_summary); m.addSeparator()
+        quick=m.addMenu('Quick Analysis')
+        for action in (self.a_region_stats,self.a_hist,self.a_scatter,self.a_spectrum,self.a_load_map,self.a_sensor_health): quick.addAction(action)
+        m.addAction(self.a_shift_report); m.addSeparator(); m.addAction(self.a_metric_report); m.addAction(self.a_saved_report); m.addAction(self.a_saved_trend); m.addAction(self.a_strip_model); m.addAction(self.a_envelope); m.addAction(self.a_delta); m.addAction(self.a_comparison_summary); m.addSeparator()
         m.addAction(self.a_reconstruct)
         m.addAction(self.a_infer)
         m.addAction(self.a_capture_snapshot)
@@ -4041,7 +4183,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ('Add Waveform',lambda:self.current_sheet().add_waveform()),('Add Values',lambda:self.current_sheet().add_values()),('Add Gauge / Status',lambda:self.current_sheet().add_gauge()),
             ('Add Scatter',lambda:self.current_sheet().add_scatter()),('Add Histogram',lambda:self.current_sheet().add_histogram()),
             ('Add FFT / PSD Spectrum',lambda:self.current_sheet().add_spectrum()),('Add Load / Heat Map',lambda:self.current_sheet().add_load_map()),('Add Segment / KPI Report',lambda:self.current_sheet().add_metric_report()),('Add NHRA Strip / Model Residuals',lambda:self.current_sheet().add_strip_model()),('Add Multi-Run Envelope',lambda:self.current_sheet().add_envelope()),
-            ('Add Reference Delta',lambda:self.current_sheet().add_delta()),('Add Run Comparison Summary',lambda:self.current_sheet().add_comparison_summary()),('Add Alarm Status',lambda:self.current_sheet().add_alarm_status()),('Add A-B Region Statistics',lambda:self.current_sheet().add_region_stats()),('Add Sensor Health',lambda:self.current_sheet().add_sensor_health()),
+            ('Add Reference Delta',lambda:self.current_sheet().add_delta()),('Add Run Comparison Summary',lambda:self.current_sheet().add_comparison_summary()),('Add Alarm Status',lambda:self.current_sheet().add_alarm_status()),('Add Cursor Region Statistics',lambda:self.current_sheet().add_region_stats()),('Add Sensor Health',lambda:self.current_sheet().add_sensor_health()),
             ('Pro Stock Shift Report…',self._pro_stock_shift_report),('Calculated Channel…',self._new_math_channel),('Data Gate…',self._new_data_gate),('Reconstruct Delivered Power…',self._reconstruct_power),
             ('Inference Center…',self._inference_center),('Create Compare Run…',self._create_compare_run),('Save Current Compare Set…',self._save_current_compare_set),('Apply Named Compare Set…',self._apply_named_compare_set),('Next Reference Run',lambda:self._step_compare_reference(1)),('Previous Reference Run',lambda:self._step_compare_reference(-1)),('Simulation Study Center…',self._simulation_study_center),('Capture Vehicle Model Snapshot…',self._capture_model_snapshot),('Engineering History…',self._engineering_history),('Sync NHRA Tech Services Data…',self._sync_tech_services_data),('Attach Data Log to Selected Run…',self._attach_local_telemetry_to_selected_run),('Keep Active Asset Offline',self._keep_active_offline),
             ('Run Import / Plot Data Self-Test…',self._run_data_selftest),('Open Diagnostic Log Folder',self._open_log_folder),
@@ -4399,7 +4541,7 @@ class MainWindow(QtWidgets.QMainWindow):
             'Click / left-drag waveform — position or scrub the live cursor &nbsp;&nbsp; Middle-drag — pan X<br>'
             'Home / End — cursor to recording boundary &nbsp;&nbsp; + / - — zoom X around cursor<br>'
             'Ctrl+Z — previous zoom &nbsp;&nbsp; Ctrl+Alt+Z — fit drag run<br>'
-            'R — add/remove red reference cursor at current position &nbsp;&nbsp; M/X/N/E/Q — toggle Min/Max/Mean/Delta/Std statistics<br>'
+            'R — add/remove red reference cursor at current position &nbsp;&nbsp; M/X/N/E/Q — toggle Min/Max/Mean/Delta/Std statistics between Ref and Cursor<br>'
             'K — cycle Time/Distance axis &nbsp;&nbsp; D — display properties &nbsp;&nbsp; P/Insert — parameter search<br>'
             'Shift+click waveform — place reference cursor directly &nbsp;&nbsp; Ctrl+click — place cursor B<br><br>'
             '<b>Application</b><br>'
@@ -4441,6 +4583,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.channel_search.selectAll()
 
     def _channel_add(self,c): self.current_sheet().add_channel(c)
+
+    def _channel_remove(self,c):
+        ws=self.current_sheet()
+        if ws.waveforms:
+            ws.waveforms[0].remove_channel(str(c))
+
 
     def _quick_graph_selected(self, index):
         if index <= 0:
