@@ -108,3 +108,31 @@ def test_run_browser_actions_do_not_force_an_overwide_left_dock():
     assert "self.attach_btn=QtWidgets.QPushButton('Attach Data…')" in block
     assert 'primary=QtWidgets.QHBoxLayout()' in block
     assert 'secondary=QtWidgets.QHBoxLayout()' in block
+
+
+def test_compact_waveform_headers_refresh_on_every_cursor_or_reference_motion():
+    source = Path(__file__).resolve().parents[1].joinpath('desktop.py').read_text(encoding='utf-8')
+    block = source.split('def _schedule_readout(self, *_args):',1)[1].split('def _set_navigator_visible',1)[0]
+    assert 'if not self.show_readout' not in block
+    assert 'self._readout_timer.start()' in block
+    refresh = source.split('def _refresh_readout(self):',1)[1].split('def refresh(self):',1)[0]
+    assert 'self._refresh_plot_headers()' in refresh
+    assert 'self._update_reference_regions()' in refresh
+
+
+def test_run_browser_compact_scope_uses_current_or_last_completed_not_future_db_tail():
+    source = Path(__file__).resolve().parents[1].joinpath('desktop.py').read_text(encoding='utf-8')
+    block = source.split('class RunBrowser',1)[1].split('class AnalysisCaseBrowser',1)[0]
+    assert "Current / last completed" in block
+    assert 'if start is not None and end is not None and start <= now <= end:' in block
+    assert 'if end is not None and end < now:' in block
+    assert 'if start is not None and start > now:' in block
+    assert 'events=self._trackside_event_order(events)' in block
+
+
+def test_attached_local_run_data_auto_reopens_when_run_is_selected_again():
+    source = Path(__file__).resolve().parents[1].joinpath('desktop.py').read_text(encoding='utf-8')
+    block = source.split('def _catalog_run_selected(self, run_id: str):',1)[1].split('def _active_handle_for_catalog_run',1)[0]
+    assert '_auto_open_selected_run_data' in block
+    assert 'QTimer.singleShot(300' in block
+    assert 'local_asset_read_path' in source

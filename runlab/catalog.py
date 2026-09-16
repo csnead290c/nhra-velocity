@@ -1114,6 +1114,28 @@ class LocalCatalog:
             out.append(d)
         return out
 
+    def local_asset_read_path(self, asset_id: str) -> str:
+        """Return a decoder-safe local path for an Asset, or ``""``.
+
+        Managed cache objects are hash-named and therefore lose the source file
+        extension.  Native log decoders use that extension for fail-closed format
+        selection, so expose a filename-preserving hard-link alias when possible.
+        This also repairs older catalog rows whose local_path points directly at
+        an extensionless content-addressed object.
+        """
+        asset = self.get_asset(str(asset_id or ''))
+        if not asset:
+            return ''
+        raw = str(asset.get('local_path') or '')
+        if not raw or not Path(raw).is_file():
+            return ''
+        if str(asset.get('storage_mode') or '') == 'managed' and asset.get('sha256'):
+            try:
+                return str(self.object_store.named_alias(str(asset['sha256']), str(asset.get('filename') or '')))
+            except Exception:
+                return raw
+        return raw
+
     def get_asset(self, asset_id: str) -> Dict[str, Any] | None:
         with self._connect() as c:
             row=c.execute("SELECT * FROM assets WHERE id=?",(asset_id,)).fetchone()

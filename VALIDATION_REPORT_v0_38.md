@@ -1,15 +1,20 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.11**
+Validated build: **0.38.0-dev.12**
 
 ## Scope
 
-This validation covers the dev.11 ATLAS-style waveform interaction and workbook-shell usability pass on top of the staged/background Tech Services sync, protected account flow, manual launch re-zero, persistent Run-linked local data logs, Run-first workspace, and native logger support.
+This validation covers the dev.12 live cursor/readout, managed Run-data reopen, and current/latest-completed event-selection fixes on top of the dev.11 ATLAS-style waveform interaction and workbook-shell usability pass, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
 
 ## Results
 
-- Full automated suite completed **234/234 tests**.
+- Full automated suite completed **238/238 tests** (99 + 139 in two groups to stay below the execution wall-clock limit).
 - `python -m py_compile desktop.py` passed.
+- New dev.12 regression coverage verifies:
+  - compact per-band current/reference/delta values are scheduled for refresh on every cursor/reference move even when the detailed table is hidden;
+  - a managed Run attachment can be reopened from a fresh catalog instance and actually decoded through its original filename/extension, not merely found as a database row;
+  - compact Run scope prioritizes the current event or most recently completed event ahead of future database rows;
+  - selecting a Run with local attached data schedules an automatic reopen after a short debounce.
 - New source-level regression coverage verifies:
   - left-drag-anywhere waveform cursor ownership through `VelocityWaveformViewBox`;
   - Widget-with-children shortcut binding for `R`, `+`, and `-`;
@@ -46,3 +51,7 @@ The dev.11 Waveform interaction intentionally follows the verified ATLAS model w
 ## Authority / persistence invariants
 
 No source evidence, official NHRA timing, canonical weather, or Tech Services Run identity is rewritten by these UI changes. Manual launch zero remains an analysis coordinate override. Local data-log attachments remain explicit managed Velocity associations to an authoritative Run and are not uploaded or inferred from filenames.
+
+## dev.12 persistence root cause
+
+The earlier persistence regression only proved that the Run→Asset row and managed SHA-256 object survived a catalog reopen. It did not prove that the managed bytes could be decoded again. The object store uses extensionless hash filenames by design; native decoder routing is deliberately extension-aware/fail-closed. dev.12 adds filename-preserving aliases for read/decode while keeping the underlying content-addressed object authoritative and hash-verifiable.

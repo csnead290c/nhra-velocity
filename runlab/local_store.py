@@ -65,6 +65,33 @@ class LocalObjectStore:
                 tmp.unlink(missing_ok=True)
         return StoredObject(digest, target, size, existed)
 
+
+    def named_alias(self, sha256: str, filename: str) -> Path:
+        """Return a stable filename-preserving alias for a managed object.
+
+        The content-addressed store intentionally names immutable bytes by hash,
+        but native motorsport decoders often use the original extension to select
+        the correct parser (.ld, .rpk, .dlz, etc.).  A hard-link alias preserves
+        that filename without duplicating the underlying bytes.  Copy is a rare
+        fallback for filesystems that do not support hard links.
+        """
+        source = self.object_path(sha256)
+        if not source.is_file():
+            raise FileNotFoundError(source)
+        safe_name = Path(str(filename or '')).name.strip() or str(sha256).lower()
+        alias_dir = self.root / 'named' / str(sha256).lower()[:2] / str(sha256).lower()[2:4] / str(sha256).lower()
+        alias = alias_dir / safe_name
+        if alias.is_file():
+            return alias
+        alias_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            os.link(source, alias)
+        except FileExistsError:
+            pass
+        except OSError:
+            shutil.copy2(source, alias)
+        return alias
+
     def verify(self, sha256: str) -> bool:
         path = self.object_path(sha256)
         if not path.is_file():

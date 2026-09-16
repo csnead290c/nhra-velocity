@@ -16,6 +16,7 @@ import logging
 import traceback
 import subprocess
 import time
+from datetime import date
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -303,7 +304,7 @@ class RunBrowser(QtWidgets.QWidget):
         lay=QtWidgets.QVBoxLayout(self);lay.setContentsMargins(4,4,4,4)
         filter_row=QtWidgets.QHBoxLayout()
         self.search=QtWidgets.QLineEdit();self.search.setPlaceholderText('Search drivers / classes / runs…')
-        self.event_scope=QtWidgets.QComboBox();self.event_scope.addItem('Latest event','latest');self.event_scope.addItem('All events','all');self.event_scope.setToolTip('Latest event keeps the trackside list compact. Searching automatically spans all synchronized events.')
+        self.event_scope=QtWidgets.QComboBox();self.event_scope.addItem('Current / last completed','latest');self.event_scope.addItem('All events','all');self.event_scope.setToolTip('Shows the current event when one is underway; otherwise the most recently completed synchronized event. Searching automatically spans all synchronized events.')
         filter_row.addWidget(self.search,1);filter_row.addWidget(self.event_scope);lay.addLayout(filter_row)
         self.tree=QtWidgets.QTreeWidget();self.tree.setHeaderLabels(['Run / Event','Driver','Class','Round','ET','MPH','Data'])
         self.tree.setColumnWidth(0,185);self.tree.setColumnWidth(1,120);self.tree.setColumnWidth(2,112);self.tree.setColumnWidth(3,48);self.tree.setColumnWidth(4,54);self.tree.setColumnWidth(5,60);self.tree.setColumnWidth(6,48)
@@ -370,12 +371,47 @@ class RunBrowser(QtWidgets.QWidget):
         stamp=str(record.get('run_datetime') or '').replace('T',' ')
         return stamp[11:19] if len(stamp)>=19 else (stamp[:16] or 'Run')
 
+    @staticmethod
+    def _trackside_event_order(events, today=None):
+        """Current event first; otherwise most recently completed first.
+
+        Future events never win the compact trackside scope merely because they
+        have the latest date in the database. Remaining completed events are
+        newest-first, then upcoming events nearest-first, then undated rows.
+        """
+        now = today or date.today()
+
+        def parse(value):
+            raw = str(value or '').strip()
+            if not raw:
+                return None
+            try:
+                return date.fromisoformat(raw[:10])
+            except ValueError:
+                return None
+
+        def key(event):
+            start = parse(event.get('start_date'))
+            end = parse(event.get('end_date')) or start
+            if start is not None and end is not None and start <= now <= end:
+                return (0, -start.toordinal(), str(event.get('name') or ''))
+            if end is not None and end < now:
+                return (1, -end.toordinal(), str(event.get('name') or ''))
+            if start is not None and start > now:
+                return (2, start.toordinal(), str(event.get('name') or ''))
+            return (3, 0, str(event.get('name') or ''))
+
+        return sorted(list(events), key=key)
+
     def refresh(self):
         selected=self.selected_run_id();query=self.search.text().strip();self.tree.clear();total=0
         show_all=(self.event_scope.currentData()=='all') or bool(query)
         try:
             visible_event_index=0
-            for event in self.catalog.list_events():
+            events=self.catalog.list_events()
+            if not show_all:
+                events=self._trackside_event_order(events)
+            for event in events:
                 if not show_all and visible_event_index>=1:
                     break
                 if not event.get('remote_id') and str(event.get('sync_state') or '')!='synced':
@@ -404,7 +440,7 @@ class RunBrowser(QtWidgets.QWidget):
                         contains_selected=True;self.tree.setCurrentItem(item)
                 root.setExpanded(bool(query) or contains_selected or (visible_event_index==0 and not selected))
                 visible_event_index+=1
-            stats=self.catalog.stats();scope_text='searching all events' if query else ('all events' if show_all else 'latest event')
+            stats=self.catalog.stats();scope_text='searching all events' if query else ('all events' if show_all else 'current / last completed')
             self.summary.setText(f"{total} shown • {stats['runs']} cached runs • {stats['assets']} attached files • {scope_text}")
         except Exception as exc:self.summary.setText(f'Catalog error: {exc}')
 
@@ -730,7 +766,8 @@ class SynchronizedReviewPanel(QtWidgets.QWidget):
     def _numeric_run(self,src):
         if src.asset_id in self._numeric_runs:return self._numeric_runs[src.asset_id]
         if not src.cached or not src.local_path or not Path(src.local_path).is_file():raise FileNotFoundError('Cache this source locally before numeric review.')
-        run=load_telemetry(src.local_path);self._numeric_runs[src.asset_id]=run;return run
+        path=self.catalog.local_asset_read_path(src.asset_id) or src.local_path
+        run=load_telemetry(path);self._numeric_runs[src.asset_id]=run;return run
 
     def _show_numeric(self,src):
         if src.asset_time_s is None:
@@ -1640,9 +1677,12 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.refresh()
 
     def _schedule_readout(self, *_args):
-        if not self.show_readout:
-            self.zero_label.setText(f"Cursor  {self.cursors.x:.4f}")
-            return
+        # The compact per-band headers are the primary live readout now, so
+        # cursor/reference changes must refresh even when the optional detailed
+        # table is hidden.  dev.11 returned early here, which let the cursor line
+        # move while its displayed value/ref/delta stayed stale until some other
+        # action forced a redraw.
+        self.zero_label.setText(f"Cursor  {self.cursors.x:.4f}")
         if not self._readout_timer.isActive():
             self._readout_timer.start()
 
@@ -5129,7 +5169,7 @@ class MainWindow(QtWidgets.QMainWindow):
                         self.catalog,path,run,run_id=run_id,managed=True,local_attachment=True
                     )
                     asset=self.catalog.get_asset(asset_id) or {}
-                    stored_path=str(asset.get('local_path') or path)
+                    stored_path=self.catalog.local_asset_read_path(asset_id) or str(asset.get('local_path') or path)
                     already=next((h for h in self.store.runs if str(h.catalog_asset_id or '')==str(asset_id)),None)
                     if already is not None:
                         existing_count+=1
@@ -5175,8 +5215,27 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if handle is None:
             logs=[a for a in self.catalog.list_assets(rid) if a.get('asset_type')=='telemetry']
-            if logs:
-                self.statusBar().showMessage(f"{len(logs)} data log(s) attached to this Run — double-click the Run or choose Open Data to load.",3500)
+            local_logs=[a for a in logs if self.catalog.local_asset_read_path(str(a.get('id') or ''))]
+            if local_logs:
+                # An attached local data log should behave as part of the Run,
+                # not as a separate file the user must remember to reopen. Delay
+                # slightly so arrowing/searching through the list does not decode
+                # every transient selection. The selected Run is re-checked before
+                # any file is opened.
+                self.statusBar().showMessage(f"{len(local_logs)} attached data log(s) available locally — loading selected Run…",2500)
+                QtCore.QTimer.singleShot(300, lambda run_id=rid: self._auto_open_selected_run_data(run_id))
+            elif logs:
+                self.statusBar().showMessage(f"{len(logs)} data log(s) attached to this Run — choose Open Data to cache/load.",3500)
+
+    def _auto_open_selected_run_data(self, run_id: str):
+        rid=str(run_id or '')
+        if not rid or self.run_browser.selected_run_id()!=rid:
+            return
+        if self._active_handle_for_catalog_run(rid) is not None:
+            return
+        local_logs=[a for a in self.catalog.list_assets(rid) if a.get('asset_type')=='telemetry' and self.catalog.local_asset_read_path(str(a.get('id') or ''))]
+        if local_logs:
+            self._open_catalog_run(rid, local_only=True, quiet=True)
 
     def _active_handle_for_catalog_run(self, run_id: str) -> Optional[RunHandle]:
         rid=str(run_id or '')
@@ -5216,18 +5275,20 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as exc:
             logging.exception('Standard Run report generation failed');QtWidgets.QMessageBox.warning(self,'Run Report',str(exc))
 
-    def _open_catalog_run(self, run_id: str):
+    def _open_catalog_run(self, run_id: str, *, local_only: bool = False, quiet: bool = False):
         record=self.catalog.get_run(run_id)
         if record is None:
             QtWidgets.QMessageBox.warning(self,'Run Browser',f'Run {run_id} was not found in the local catalog.');return
         assets=[a for a in self.catalog.list_assets(run_id) if a.get('asset_type')=='telemetry']
+        if local_only:
+            assets=[a for a in assets if self.catalog.local_asset_read_path(str(a.get('id') or ''))]
         if not assets:
             QtWidgets.QMessageBox.information(self,'Run Browser','This Run does not yet have a data log attached.');return
         errors=[];opened=0;existing_count=0
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         try:
             for asset in assets:
-                path=str(asset.get('local_path') or '')
+                path=self.catalog.local_asset_read_path(str(asset.get('id') or ''))
                 try:
                     existing=next((h for h in self.store.runs if str(h.catalog_asset_id or '')==str(asset['id'])),None)
                     if existing is not None:
@@ -5237,7 +5298,10 @@ class MainWindow(QtWidgets.QMainWindow):
                             except ValueError:pass
                         continue
                     if not path or not Path(path).is_file():
-                        path=ensure_asset_cached(self.catalog,self.tech_services,str(asset['id']))
+                        ensure_asset_cached(self.catalog,self.tech_services,str(asset['id']))
+                        path=self.catalog.local_asset_read_path(str(asset['id']))
+                    if not path or not Path(path).is_file():
+                        raise FileNotFoundError(asset.get('filename') or asset.get('id'))
                     run=load_telemetry(path)
                     session_id=self.catalog.ensure_telemetry_session(str(asset['id']),display_name=str(asset.get('filename') or Path(path).stem),vendor=run.vendor,channel_summary={'channels':len(run.data.columns),'canonical_roles':sorted(run.channel_map.keys())})
                     apply_catalog_run_authority(self.catalog,run_id,run)
@@ -5250,7 +5314,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self,'run_workspace'):self.run_workspace.set_run(run_id)
         if opened or existing_count:
             self.statusBar().showMessage(f"Opened catalog run: {record.get('event_name') or 'Local'} — {opened} opened, {existing_count} already loaded",7000)
-        if errors:QtWidgets.QMessageBox.warning(self,'Run Browser','Some assets were unavailable:\n\n'+'\n'.join(errors))
+        if errors and not quiet:QtWidgets.QMessageBox.warning(self,'Run Browser','Some assets were unavailable:\n\n'+'\n'.join(errors))
 
     def _case_review_time_changed(self, case_id: str, case_time_s: float):
         """Drive the active telemetry cursor from the shared AnalysisCase clock."""
@@ -5783,12 +5847,18 @@ class MainWindow(QtWidgets.QMainWindow):
             p=str(rec.get('path','') or '')
             catalog_asset_id=str(rec.get('catalog_asset_id','') or '')
             catalog_run_id=str(rec.get('catalog_run_id','') or '')
-            if (not p or not Path(p).is_file()) and catalog_asset_id:
+            if catalog_asset_id:
                 asset=self.catalog.get_asset(catalog_asset_id)
                 if asset:
-                    p=str(asset.get('local_path') or '')
-                    if not p or not Path(p).is_file():
-                        try:p=ensure_asset_cached(self.catalog,self.tech_services,catalog_asset_id)
+                    # Prefer the catalog's filename-preserving managed alias even
+                    # when an older workbook remembered the extensionless CAS path.
+                    managed_path=self.catalog.local_asset_read_path(catalog_asset_id)
+                    if managed_path:
+                        p=managed_path
+                    elif not p or not Path(p).is_file():
+                        try:
+                            ensure_asset_cached(self.catalog,self.tech_services,catalog_asset_id)
+                            p=self.catalog.local_asset_read_path(catalog_asset_id)
                         except Exception:pass
             try:
                 h=self.store.add(p,load_telemetry(p));h.role=rec.get('role','available'); h.time_alignment_s=float(rec.get('time_alignment_s',0.0) or 0.0); h.display_name=str(rec.get('display_name') or Path(p).stem)

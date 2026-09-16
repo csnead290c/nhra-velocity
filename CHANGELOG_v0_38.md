@@ -1,5 +1,14 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.12 — live cursor readout + durable Run data + event scope fix
+
+- Fixed the compact waveform headers so **current value, reference value and delta update continuously with cursor/reference motion** even when the optional detailed table is hidden. dev.11 incorrectly returned early from the coalesced readout path when the table was hidden, so cursor lines moved while displayed values remained stale until another action forced a redraw.
+- Strengthened local Run-data persistence beyond the database link. Velocity's content-addressed object store intentionally names managed files by SHA-256, but that removed source extensions required for fail-closed native decoder dispatch on reopen. Managed Assets now expose a filename-preserving hard-link alias (copy fallback), so `.ld`, `.rpk`, `.dlz`, `.MaxxECU-log`, CSV and other supported files remain decodable after restart while retaining verified/deduplicated storage.
+- Updated workbook and synchronized-review reopen paths to use the decoder-safe managed Asset path, repairing older workbooks/catalog rows that remember an extensionless content-addressed path.
+- Selecting a Tech Services Run with an attached locally managed data log now **auto-reopens the attached data after a short debounce**. This makes the attachment behave as part of the Run while avoiding repeated decode work as the user rapidly arrows/searches through the Run list.
+- Fixed the compact Run-browser event scope. **Current / last completed** now selects an event underway today when applicable; otherwise it selects the most recently completed event. Future events can no longer win simply because the catalog sorts `start_date DESC`. Search and All events still span the full synchronized catalog.
+- Added regression coverage that actually reopens and decodes a managed data log from its catalog attachment, plus explicit guards for live header refresh, event prioritization and attached-data auto-reopen behavior.
+
 ## v0.38.0-dev.11 — ATLAS-style waveform interaction + workbook shell
 
 - Reworked the Waveform left-button interaction so **click or left-drag anywhere in the plot moves the engineering cursor**. The user no longer has to hit the one-pixel cursor line to scrub a run. Middle-drag remains available for X-axis panning.

@@ -156,3 +156,37 @@ def test_local_run_data_attachment_persists_across_catalog_reopen(tmp_path: Path
     assert len(run_rows) == 1
     assert run_rows[0]["data_log_count"] == 1
     assert run_rows[0]["local_data_log_count"] == 1
+
+
+def test_managed_run_data_reopens_through_filename_preserving_alias(tmp_path: Path):
+    """A managed object is hash-named, but native decoders need the source suffix.
+
+    This is the real close/reopen path that the earlier persistence test missed:
+    not only must the Run->Asset row survive, the stored bytes must still be
+    decodable after the original user-selected file is no longer being used.
+    """
+    db_path = tmp_path / "catalog.sqlite"
+    object_root = tmp_path / "objects"
+    catalog = LocalCatalog(path=db_path, object_store=LocalObjectStore(object_root))
+    event_id = catalog.create_event("Decode Persistence", season=2026, remote_id="evt-decode", sync_state="synced")
+    run_id = catalog.create_run(event_id=event_id, run_key="tech-services:run-decode", remote_id="run-decode", sync_state="synced")
+    source = tmp_path / "team-run.csv"
+    source.write_text("Time (s),Engine RPM\n0,5000\n0.1,6000\n")
+    decoded = TelemetryRun(
+        name="team-run",
+        data=pd.DataFrame({"Time (s)": [0.0, 0.1], "Engine RPM": [5000.0, 6000.0]}),
+        channel_map={"time_s": "Time (s)", "engine_rpm": "Engine RPM"},
+        vendor="generic",
+    )
+    _, asset_id, _ = register_opened_telemetry(catalog, str(source), decoded, run_id=run_id, managed=True, local_attachment=True)
+
+    reopened = LocalCatalog(path=db_path, object_store=LocalObjectStore(object_root))
+    read_path = Path(reopened.local_asset_read_path(asset_id))
+    assert read_path.is_file()
+    assert read_path.name == "team-run.csv"
+
+    from runlab.importers import load_telemetry
+    restored = load_telemetry(read_path)
+    assert len(restored.data) == 2
+    assert "engine_rpm" in restored.channel_map
+    assert restored.channel_map["engine_rpm"] in restored.data.columns
