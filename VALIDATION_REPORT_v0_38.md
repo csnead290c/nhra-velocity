@@ -95,3 +95,11 @@ This build still requires a real Windows Qt/pyqtgraph smoke test for the simplif
 - Added manual launch-zero regression tests covering detector override, Time-from-Launch waveform re-zero and raw Logger Time immutability.
 - Added UI/source-contract coverage for the visible Zero control plus explicit Sync Tech Services / Refresh View separation.
 - Full automated pytest suite passed: **227/227 tests** across three execution groups. Python compilation also passed before packaging the dev.9 bundle.
+
+
+## v0.38.0-dev.10 focused validation
+
+- Added regression coverage for click/drag cursor semantics, X-only waveform mouse navigation, compact readout defaults, friendly Run-browser labels and visible data-log status.
+- Added a catalog-reopen test proving a managed local data log remains linked to its authoritative NHRA Tech Services Run across application restarts.
+- Verified Python compilation after UI/catalog changes.
+- Full automated suite: **231/231 tests passed** when executed in file groups to avoid the container wall-clock limit.

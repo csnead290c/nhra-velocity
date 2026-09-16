@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""NHRA Velocity desktop telemetry workstation.
+"""NHRA Velocity desktop data-analysis workstation.
 
 This is intentionally a desktop application rather than a web UI.  It uses the
 same mental model as professional motorsport analysis tools: projects/workspaces
@@ -300,17 +300,20 @@ class RunBrowser(QtWidgets.QWidget):
     def __init__(self, catalog: LocalCatalog):
         super().__init__(); self.catalog=catalog
         lay=QtWidgets.QVBoxLayout(self);lay.setContentsMargins(4,4,4,4)
-        self.search=QtWidgets.QLineEdit();self.search.setPlaceholderText('Search events / drivers / runs…');lay.addWidget(self.search)
-        self.tree=QtWidgets.QTreeWidget();self.tree.setHeaderLabels(['Run / Event','Driver','Class','Round','ET','MPH','Assets','Cached'])
-        self.tree.setColumnWidth(0,235);self.tree.setColumnWidth(1,135);self.tree.setColumnWidth(2,120);self.tree.setColumnWidth(3,65);self.tree.setColumnWidth(4,62);self.tree.setColumnWidth(5,68);self.tree.setColumnWidth(6,55);self.tree.setColumnWidth(7,55)
+        filter_row=QtWidgets.QHBoxLayout()
+        self.search=QtWidgets.QLineEdit();self.search.setPlaceholderText('Search drivers / classes / runs…')
+        self.event_scope=QtWidgets.QComboBox();self.event_scope.addItem('Latest event','latest');self.event_scope.addItem('All events','all');self.event_scope.setToolTip('Latest event keeps the trackside list compact. Searching automatically spans all synchronized events.')
+        filter_row.addWidget(self.search,1);filter_row.addWidget(self.event_scope);lay.addLayout(filter_row)
+        self.tree=QtWidgets.QTreeWidget();self.tree.setHeaderLabels(['Run / Event','Driver','Class','Round','ET','MPH','Data'])
+        self.tree.setColumnWidth(0,235);self.tree.setColumnWidth(1,145);self.tree.setColumnWidth(2,135);self.tree.setColumnWidth(3,58);self.tree.setColumnWidth(4,62);self.tree.setColumnWidth(5,70);self.tree.setColumnWidth(6,62)
         self.tree.setAlternatingRowColors(True);self.tree.itemDoubleClicked.connect(self._double);self.tree.currentItemChanged.connect(self._selection_changed);lay.addWidget(self.tree,1)
-        row=QtWidgets.QHBoxLayout();self.open_btn=QtWidgets.QPushButton('Open Run');self.attach_btn=QtWidgets.QPushButton('Attach Local Telemetry…');self.offline_btn=QtWidgets.QPushButton('Cache Offline');self.incident_btn=QtWidgets.QPushButton('New Analysis Case');self.sync_btn=QtWidgets.QPushButton('Sync Tech Services');self.refresh_btn=QtWidgets.QPushButton('Refresh View')
+        row=QtWidgets.QHBoxLayout();self.open_btn=QtWidgets.QPushButton('Open Data');self.attach_btn=QtWidgets.QPushButton('Attach Data Log…');self.offline_btn=QtWidgets.QPushButton('Cache Offline');self.incident_btn=QtWidgets.QPushButton('New Analysis Case');self.sync_btn=QtWidgets.QPushButton('Sync Tech Services');self.refresh_btn=QtWidgets.QPushButton('Refresh View')
         for b in (self.open_btn,self.attach_btn,self.offline_btn,self.incident_btn):row.addWidget(b)
         row.addStretch(1);row.addWidget(self.sync_btn);row.addWidget(self.refresh_btn);lay.addLayout(row)
-        note=QtWidgets.QLabel('Select an authoritative NHRA Tech Services Run, then attach telemetry manually for analysis. Local attachments are stored in Velocity and never uploaded or matched by filename; future server Asset support can replace this local bridge without changing Run identity.')
+        note=QtWidgets.QLabel('Select the authoritative NHRA Tech Services Run, then attach its data log. Velocity keeps that local Run association and managed copy across restarts; nothing is uploaded or matched by filename.')
         note.setWordWrap(True);note.setStyleSheet('color:#aeb4bb;padding:2px');lay.addWidget(note)
         self.summary=QtWidgets.QLabel();self.summary.setStyleSheet('color:#aeb4bb;padding:2px');lay.addWidget(self.summary)
-        self.search.textChanged.connect(lambda _t:self.refresh());self.sync_btn.clicked.connect(lambda _checked=False:self.syncRequested.emit());self.refresh_btn.clicked.connect(self.refresh)
+        self.search.textChanged.connect(lambda _t:self.refresh());self.event_scope.currentIndexChanged.connect(lambda _i:self.refresh());self.sync_btn.clicked.connect(lambda _checked=False:self.syncRequested.emit());self.refresh_btn.clicked.connect(self.refresh)
         self.open_btn.clicked.connect(lambda:self._emit(self.openRunRequested));self.attach_btn.clicked.connect(lambda:self._emit(self.attachTelemetryRequested));self.offline_btn.clicked.connect(self._offline);self.incident_btn.clicked.connect(lambda:self._emit(self.analysisCaseRequested))
         self.refresh()
 
@@ -343,26 +346,60 @@ class RunBrowser(QtWidgets.QWidget):
     def _selection_changed(self,current,previous):
         self.runSelectionChanged.emit(self.selected_run_id())
 
+    @staticmethod
+    def _friendly_run_label(record):
+        parts=[]
+        run_number=record.get('run_number')
+        if run_number not in (None,''):
+            parts.append(f"Run {run_number}")
+        car=str(record.get('car_number') or '').strip()
+        if car:
+            parts.append(f"#{car}")
+        lane=str(record.get('lane') or '').strip()
+        if lane:
+            lane_label={'l':'Left','left':'Left','r':'Right','right':'Right'}.get(lane.lower(),lane)
+            parts.append(lane_label)
+        if parts:
+            return ' · '.join(parts)
+        stamp=str(record.get('run_datetime') or '').replace('T',' ')
+        return stamp[11:19] if len(stamp)>=19 else (stamp[:16] or 'Run')
+
     def refresh(self):
         selected=self.selected_run_id();query=self.search.text().strip();self.tree.clear();total=0
+        show_all=(self.event_scope.currentData()=='all') or bool(query)
         try:
+            visible_event_index=0
             for event in self.catalog.list_events():
+                if not show_all and visible_event_index>=1:
+                    break
                 if not event.get('remote_id') and str(event.get('sync_state') or '')!='synced':
                     continue
                 runs=self.catalog.list_runs(event_id=event['id'],search=query,limit=5000)
                 if query and not runs:continue
                 label=event['name'] or 'Event'
                 if event.get('season'):label=f"{event['season']} — {label}"
-                root=QtWidgets.QTreeWidgetItem([label,'','','','','',str(len(runs)),'']);root.setData(0,QtCore.Qt.UserRole,str(event['id']));root.setData(0,QtCore.Qt.UserRole+1,'event')
+                root=QtWidgets.QTreeWidgetItem([label,'','','','','',f'{len(runs)} runs']);root.setData(0,QtCore.Qt.UserRole,str(event['id']));root.setData(0,QtCore.Qt.UserRole+1,'event')
+                root.setToolTip(0,str(event.get('name') or 'Event'))
                 f=root.font(0);f.setBold(True);root.setFont(0,f);self.tree.addTopLevelItem(root)
+                contains_selected=False
                 for r in runs:
-                    total+=1;run_label=(r.get('run_key') or '').strip() or (str(r.get('run_datetime') or '')[0:16].replace('T',' ') or 'Run')
-                    assets=int(r.get('asset_count') or 0);cached=int(r.get('offline_asset_count') or 0);et=r.get('et_s');mph=r.get('mph')
-                    item=QtWidgets.QTreeWidgetItem([run_label,str(r.get('driver_name') or ''),str(r.get('category') or ''),str(r.get('round') or ''),'' if et in (None,'') else f'{float(et):.3f}','' if mph in (None,'') else f'{float(mph):.2f}',str(assets),f'{cached}/{assets}' if assets else '0'])
-                    item.setData(0,QtCore.Qt.UserRole,str(r['id']));item.setData(0,QtCore.Qt.UserRole+1,'run');item.setToolTip(0,str(r.get('remote_id') or r['id']));root.addChild(item)
-                    if str(r['id'])==selected:self.tree.setCurrentItem(item)
-                root.setExpanded(bool(query))
-            stats=self.catalog.stats();self.summary.setText(f"{stats['runs']} runs • {stats['assets']} mirrored assets • {stats['analysis_cases']} analysis cases • {stats['model_snapshots']} model snapshots • schema {self.catalog.schema_version}")
+                    total+=1;run_label=self._friendly_run_label(r)
+                    data_logs=int(r.get('data_log_count') or 0);local_logs=int(r.get('local_data_log_count') or 0);et=r.get('et_s');mph=r.get('mph')
+                    data_text=(f'{data_logs} local' if local_logs else str(data_logs)) if data_logs else '—'
+                    item=QtWidgets.QTreeWidgetItem([run_label,str(r.get('driver_name') or ''),str(r.get('category') or ''),str(r.get('round') or ''),'' if et in (None,'') else f'{float(et):.3f}','' if mph in (None,'') else f'{float(mph):.2f}',data_text])
+                    item.setData(0,QtCore.Qt.UserRole,str(r['id']));item.setData(0,QtCore.Qt.UserRole+1,'run')
+                    detail=' · '.join(x for x in (str(r.get('remote_id') or ''),str(r.get('run_datetime') or ''),str(r.get('run_key') or '')) if x)
+                    if detail:item.setToolTip(0,detail)
+                    if data_logs:
+                        item.setToolTip(6,f"{data_logs} Run data log(s) attached; {local_logs} available in Velocity local storage.")
+                        item.setForeground(6,QtGui.QBrush(QtGui.QColor('#78d381')))
+                    root.addChild(item)
+                    if str(r['id'])==selected:
+                        contains_selected=True;self.tree.setCurrentItem(item)
+                root.setExpanded(bool(query) or contains_selected or (visible_event_index==0 and not selected))
+                visible_event_index+=1
+            stats=self.catalog.stats();scope_text='searching all events' if query else ('all events' if show_all else 'latest event')
+            self.summary.setText(f"{total} shown • {stats['runs']} cached runs • {stats['assets']} attached files • {scope_text}")
         except Exception as exc:self.summary.setText(f'Catalog error: {exc}')
 
 
@@ -803,11 +840,11 @@ class RunWorkspacePanel(QtWidgets.QWidget):
         super().__init__(parent);self.catalog=catalog;self.run_id='';self.state=None
         lay=QtWidgets.QVBoxLayout(self);lay.setContentsMargins(4,4,4,4)
         self.title=QtWidgets.QLabel('Select an authoritative Run');font=self.title.font();font.setBold(True);font.setPointSize(font.pointSize()+1);self.title.setFont(font);self.title.setWordWrap(True);lay.addWidget(self.title)
-        self.subtitle=QtWidgets.QLabel('Official timing, weather and attached telemetry stay centered on one Run.');self.subtitle.setWordWrap(True);self.subtitle.setStyleSheet('color:#aeb4bb');lay.addWidget(self.subtitle)
+        self.subtitle=QtWidgets.QLabel('Official timing, weather and attached data logs stay centered on one Run.');self.subtitle.setWordWrap(True);self.subtitle.setStyleSheet('color:#aeb4bb');lay.addWidget(self.subtitle)
 
         row=QtWidgets.QHBoxLayout()
-        self.open_btn=QtWidgets.QPushButton('Open Telemetry')
-        self.attach_btn=QtWidgets.QPushButton('Attach Telemetry…')
+        self.open_btn=QtWidgets.QPushButton('Open Data Log')
+        self.attach_btn=QtWidgets.QPushButton('Attach Data Log…')
         self.more_btn=QtWidgets.QToolButton();self.more_btn.setText('More ▾');self.more_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.more_menu=QtWidgets.QMenu(self.more_btn)
         self.profile_action=self.more_menu.addAction('Apply Class Layout')
@@ -872,7 +909,7 @@ class RunWorkspacePanel(QtWidgets.QWidget):
     def refresh(self):
         self.overview.clear();self.assets.setRowCount(0);self.engineering.clear();self.reports.setRowCount(0);self.state=None
         if not self.run_id:
-            self.title.setText('Select an authoritative Run');self.subtitle.setText('Official timing, weather and attached telemetry stay centered on one Run.');self._enable_actions(False);return
+            self.title.setText('Select an authoritative Run');self.subtitle.setText('Official timing, weather and attached data logs stay centered on one Run.');self._enable_actions(False);return
         try:self.state=build_run_workspace(self.catalog,self.run_id)
         except Exception as exc:
             self.title.setText(f'Run workspace unavailable — {exc}');self._enable_actions(False);return
@@ -883,7 +920,7 @@ class RunWorkspacePanel(QtWidgets.QWidget):
             report_status='report current' if not st.missing_expected_reports else 'report pending'
         else:
             report_status='no standard report'
-        self.subtitle.setText(f"{st.profile_label} · {len(st.telemetry_assets)} telemetry file(s) · {report_status}")
+        self.subtitle.setText(f"{st.profile_label} · {len(st.telemetry_assets)} data log(s) · {report_status}")
 
         g=self._group('Run')
         for label,key in [('Driver','driver_name'),('Category','category'),('Car number','car_number'),('Round','round'),('Lane','lane'),('Date / time','run_datetime')]:self._ov(g,label,r.get(key),'Tech Services' if r.get('sync_state')=='synced' else 'catalog')
@@ -1215,9 +1252,9 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.show_ab_cursors = False
         self.reference_visible = True
         self.show_stat_delta = True
-        self.show_stat_min = True
-        self.show_stat_max = True
-        self.show_stat_mean = True
+        self.show_stat_min = False
+        self.show_stat_max = False
+        self.show_stat_mean = False
         self.show_stat_std = False
         self.max_render_points = 50000
         # Interactive cursor sampling is deliberately cached.  The v0.36
@@ -1282,7 +1319,7 @@ class WaveformDisplay(QtWidgets.QWidget):
         ctl.addWidget(self.zero_button)
         self.more_button = QtWidgets.QToolButton()
         self.more_button.setText("More ▾")
-        self.more_button.setToolTip('Left-click: Cursor   Shift+click: A   Ctrl+click: B')
+        self.more_button.setToolTip('Click: Cursor   Drag cursor line: scrub   Shift+click: A   Ctrl+click: B   Wheel: zoom X')
         self.more_button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         more = QtWidgets.QMenu(self.more_button)
         self.more_events_action = more.addAction("Event markers"); self.more_events_action.setCheckable(True); self.more_events_action.setChecked(True)
@@ -1293,6 +1330,10 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.more_ab_action.toggled.connect(self._set_ab_visible)
         self.more_snap_action = more.addAction("Snap cursor to samples"); self.more_snap_action.setCheckable(True); self.more_snap_action.setChecked(True)
         self.more_snap_action.toggled.connect(self.snap_box.setChecked)
+        readout_columns=more.addMenu('Readout columns')
+        self._readout_stat_actions={}
+        for label,attr in [('Δ vs Ref','show_stat_delta'),('Minimum','show_stat_min'),('Maximum','show_stat_max'),('Mean','show_stat_mean'),('Std dev','show_stat_std')]:
+            action=readout_columns.addAction(label);action.setCheckable(True);action.setChecked(bool(getattr(self,attr)));action.toggled.connect(lambda checked,a=attr:self._set_readout_stat(a,checked));self._readout_stat_actions[attr]=action
         more.addSeparator()
         more.addAction("Set A from Cursor", self._set_a_from_cursor)
         more.addAction("Set B from Cursor", self._set_b_from_cursor)
@@ -1319,12 +1360,11 @@ class WaveformDisplay(QtWidgets.QWidget):
         # i2/ATLAS-style readout immediately above the traces.  A user should
         # not need a separate display just to know the value under the cursor.
         self.readout = QtWidgets.QTableWidget(0, 10)
-        self.readout.setHorizontalHeaderLabels(["Parameter", "Unit", "Cursor", "Ref", "Δ", "Min", "Max", "Mean", "Std", "B"])
-        self.readout.verticalHeader().setVisible(False)
-        header=self.readout.horizontalHeader(); header.setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents); header.setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch)
-        self.readout.setMaximumHeight(138)
-        self.readout.setMinimumHeight(58)
-        self.readout.setToolTip("Ref is cursor A. Min/Max/Mean are calculated from Ref to the live Cursor.")
+        self.readout.setHorizontalHeaderLabels(["Channel", "Unit", "Cursor", "Ref", "Δ", "Min", "Max", "Mean", "Std", "B"])
+        self.readout.verticalHeader().setVisible(False);self.readout.verticalHeader().setDefaultSectionSize(19);self.readout.verticalHeader().setMinimumSectionSize(18)
+        header=self.readout.horizontalHeader(); header.setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents); header.setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch);header.setMinimumHeight(22)
+        self.readout.setMinimumHeight(48);self.readout.setMaximumHeight(168);self.readout.setWordWrap(False)
+        self.readout.setToolTip("Compact live values. Ref is cursor A. Optional Min/Max/Mean/Std columns are available under More → Readout columns.")
         self.readout.setColumnHidden(8, True); self.readout.setColumnHidden(9, True)
         self.readout.setAlternatingRowColors(True)
         self.readout.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
@@ -1342,6 +1382,7 @@ class WaveformDisplay(QtWidgets.QWidget):
         # simple and fast: one representative channel plus a draggable region
         # controlling the synchronized waveform X range.
         self.navigator = pg.PlotWidget(background=(16, 18, 21))
+        self.navigator.setMouseEnabled(x=True, y=False)
         self.navigator.setMaximumHeight(92)
         self.navigator.setMinimumHeight(60)
         self.navigator.showGrid(x=True, y=False, alpha=0.12)
@@ -1352,12 +1393,10 @@ class WaveformDisplay(QtWidgets.QWidget):
         layout.addWidget(self.navigator)
         self.navigator.setVisible(self.show_navigator)
 
-        # Professional logger workflows expect the waveform itself to be the
-        # cursor surface.  Hovering a trace area moves the live cursor; clicking
-        # places it explicitly.  Drag/pan gestures are left alone.
-        # 30 Hz feels visually continuous while leaving enough GUI-thread time
-        # for pan/zoom and table painting on normal trackside laptops.
-        self._mouse_move_proxy = pg.SignalProxy(self.graph.scene().sigMouseMoved, rateLimit=30, slot=self._scene_mouse_moved)
+        # ATLAS-style cursor surface: click positions the shared cursor and the
+        # vertical cursor line itself is draggable. Merely hovering over a
+        # waveform never changes engineering state. Shift/Ctrl click place A/B.
+        self.graph.setToolTip('Click: position cursor   Drag cursor line: scrub   Shift+click: A   Ctrl+click: B   Wheel: zoom X')
         self.graph.scene().sigMouseClicked.connect(self._scene_mouse_clicked)
 
         # Cursor readout is also coalesced.  Signals can still move cursor lines
@@ -1497,17 +1536,6 @@ class WaveformDisplay(QtWidgets.QWidget):
             except Exception:
                 continue
         return None
-
-    def _scene_mouse_moved(self, event):
-        # SignalProxy passes a one-element argument tuple.  Do not chase the
-        # pointer while the user is panning/dragging a plot.
-        if QtWidgets.QApplication.mouseButtons() != QtCore.Qt.NoButton:
-            return
-        pos = event[0] if isinstance(event, (tuple, list)) else event
-        x = self._scene_x(pos)
-        if x is None or not np.isfinite(x):
-            return
-        self._cursor_move(x)
 
     def _scene_mouse_clicked(self, event):
         try:
@@ -1683,6 +1711,12 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.cursors.x=float(grid[idx])
         self.cursors.moved.emit(self.cursors.x)
 
+    def _set_readout_stat(self, attr: str, visible: bool):
+        if not hasattr(self,attr):
+            return
+        setattr(self,attr,bool(visible))
+        self._set_stat_column_visibility();self._refresh_readout()
+
     def _set_stat_column_visibility(self):
         # Fixed table columns: Δ=4 Min=5 Max=6 Mean=7 Std=8 B=9.
         self.readout.setColumnHidden(4,not self.show_stat_delta)
@@ -1691,6 +1725,9 @@ class WaveformDisplay(QtWidgets.QWidget):
         self.readout.setColumnHidden(7,not self.show_stat_mean)
         self.readout.setColumnHidden(8,not self.show_stat_std)
         self.readout.setColumnHidden(9,not self.show_ab_cursors)
+        for attr,action in getattr(self,'_readout_stat_actions',{}).items():
+            wanted=bool(getattr(self,attr))
+            if action.isChecked()!=wanted:action.setChecked(wanted)
 
     def _toggle_reference_cursor(self):
         self.reference_visible=not self.reference_visible
@@ -1935,6 +1972,8 @@ class WaveformDisplay(QtWidgets.QWidget):
     def _ensure_readout_items(self):
         if self.readout.rowCount()!=len(self.channels):
             self.readout.setRowCount(len(self.channels))
+        visible_rows=max(1,min(len(self.channels),7))
+        self.readout.setFixedHeight(max(48,min(168,26 + visible_rows*19)))
         for row in range(len(self.channels)):
             for col in range(10):
                 if self.readout.item(row,col) is None:
@@ -2022,6 +2061,7 @@ class WaveformDisplay(QtWidgets.QWidget):
         first_plot = None
         for row, (_group, chans) in enumerate(groups.items()):
             p = self.graph.addPlot(row=row, col=0)
+            p.setMouseEnabled(x=True, y=False)  # motorsport waveform convention: wheel/pan affect X only
             p.showGrid(x=True, y=True, alpha=0.15)
             # In a one-channel stacked plot the Y-axis already names the trace;
             # a legend just steals plot area.  Keep legends for overlays, unit
@@ -3386,8 +3426,9 @@ class Worksheet(QtWidgets.QMainWindow):
                 if idx>=0:w.layout_mode.setCurrentIndex(idx)
                 w.events_box.setChecked(bool(cfg.get('event_markers',True)))
                 w.compare=bool(cfg.get('compare',True)); w.snap_box.setChecked(bool(cfg.get('snap_cursors',True)))
-                w.show_readout=bool(cfg.get('show_readout',True)); w.show_navigator=bool(cfg.get('show_navigator',False)); w.show_legend=bool(cfg.get('show_legend',True)); w.show_ab_cursors=bool(cfg.get('show_ab_cursors',False)); w.reference_visible=bool(cfg.get('reference_visible',True)); w.show_stat_delta=bool(cfg.get('show_stat_delta',True)); w.show_stat_min=bool(cfg.get('show_stat_min',True)); w.show_stat_max=bool(cfg.get('show_stat_max',True)); w.show_stat_mean=bool(cfg.get('show_stat_mean',True)); w.show_stat_std=bool(cfg.get('show_stat_std',False)); w.max_render_points=int(cfg.get('max_render_points',50000) or 50000)
+                w.show_readout=bool(cfg.get('show_readout',True)); w.show_navigator=bool(cfg.get('show_navigator',False)); w.show_legend=bool(cfg.get('show_legend',True)); w.show_ab_cursors=bool(cfg.get('show_ab_cursors',False)); w.reference_visible=bool(cfg.get('reference_visible',True)); w.show_stat_delta=bool(cfg.get('show_stat_delta',True)); w.show_stat_min=bool(cfg.get('show_stat_min',False)); w.show_stat_max=bool(cfg.get('show_stat_max',False)); w.show_stat_mean=bool(cfg.get('show_stat_mean',False)); w.show_stat_std=bool(cfg.get('show_stat_std',False)); w.max_render_points=int(cfg.get('max_render_points',50000) or 50000)
                 w.more_events_action.setChecked(w.events_box.isChecked()); w.more_nav_action.setChecked(w.show_navigator); w.more_ab_action.setChecked(w.show_ab_cursors); w.more_snap_action.setChecked(w.snap_box.isChecked())
+                for attr,action in getattr(w,'_readout_stat_actions',{}).items(): action.setChecked(bool(getattr(w,attr)))
                 w.readout.setVisible(w.show_readout); w.navigator.setVisible(w.show_navigator); w._set_stat_column_visibility(); w._set_ab_visible(w.show_ab_cursors); w.refresh()
             elif dtype=='values': self.add_values(obj)
             elif dtype=='gauge':
@@ -3491,7 +3532,7 @@ class Worksheet(QtWidgets.QMainWindow):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{PRODUCT_NAME} — Desktop Telemetry — {PRODUCT_VERSION}")
+        self.setWindowTitle(f"{PRODUCT_NAME} — Data Analysis — {PRODUCT_VERSION}")
         self.resize(1540, 940)
         self.setAcceptDrops(True)
         self.setDockOptions(QtWidgets.QMainWindow.AllowNestedDocks | QtWidgets.QMainWindow.AllowTabbedDocks | QtWidgets.QMainWindow.GroupedDragging | QtWidgets.QMainWindow.AnimatedDocks)
@@ -3519,7 +3560,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.store.activeChanged.connect(self._active_changed)
         self.store.changed.connect(self._refresh_session_selectors)
         self._refresh_session_selectors()
-        self.statusBar().showMessage('Open a telemetry log to begin. Ctrl+O')
+        self.statusBar().showMessage('Open a data log to begin. Ctrl+O')
         # Recovery snapshots are deliberately separate from user project files.
         autosave_root=Path(QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.AppLocalDataLocation) or str(Path.home()/'.nhra-velocity'))
         autosave_root.mkdir(parents=True,exist_ok=True)
@@ -3529,8 +3570,8 @@ class MainWindow(QtWidgets.QMainWindow):
         QtCore.QTimer.singleShot(0,self._offer_recovery)
 
     def _build_actions(self):
-        self.a_open=QtGui.QAction('Open Log…',self); self.a_open.setShortcut(QtGui.QKeySequence.Open); self.a_open.triggered.connect(self.open_logs)
-        self.a_folder=QtGui.QAction('Open Log Folder…',self); self.a_folder.triggered.connect(self.open_log_folder)
+        self.a_open=QtGui.QAction('Open Data Log…',self); self.a_open.setShortcut(QtGui.QKeySequence.Open); self.a_open.triggered.connect(self.open_logs)
+        self.a_folder=QtGui.QAction('Open Data Log Folder…',self); self.a_folder.triggered.connect(self.open_log_folder)
         self.a_demo=QtGui.QAction('Open Bundled Native Demos',self); self.a_demo.triggered.connect(self._open_bundled_demos)
         self.a_import_support=QtGui.QAction('Import Support / Diagnostics…',self); self.a_import_support.triggered.connect(self._show_import_support)
         self.a_selftest=QtGui.QAction('Run Import / Plot Data Self-Test…',self); self.a_selftest.triggered.connect(self._run_data_selftest)
@@ -3542,7 +3583,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.a_history=QtGui.QAction('Engineering History…',self); self.a_history.triggered.connect(self._engineering_history)
         self.a_apply_sync=QtGui.QAction('Apply Tech Services Snapshot (Development)…',self); self.a_apply_sync.triggered.connect(self._apply_sync_snapshot)
         self.a_site_sync=QtGui.QAction('Sync NHRA Tech Services Data…',self); self.a_site_sync.triggered.connect(self._sync_tech_services_data)
-        self.a_attach_selected_run=QtGui.QAction('Attach Local Telemetry to Selected Run…',self); self.a_attach_selected_run.triggered.connect(self._attach_local_telemetry_to_selected_run)
+        self.a_attach_selected_run=QtGui.QAction('Attach Data Log to Selected Run…',self); self.a_attach_selected_run.triggered.connect(self._attach_local_telemetry_to_selected_run)
         self.a_recovery=QtGui.QAction('Recover Autosave…',self); self.a_recovery.triggered.connect(lambda:self._recover_snapshot(force=True))
         self.a_sheet=QtGui.QAction('New Worksheet',self); self.a_sheet.setShortcut('Ctrl+Shift+N'); self.a_sheet.triggered.connect(lambda:self.add_worksheet())
         self.a_duplicate_sheet=QtGui.QAction('Duplicate Worksheet',self); self.a_duplicate_sheet.setShortcut('Ctrl+Shift+D'); self.a_duplicate_sheet.triggered.connect(self._duplicate_current_sheet)
@@ -3609,7 +3650,7 @@ class MainWindow(QtWidgets.QMainWindow):
         tb=self.addToolBar('Main'); tb.setObjectName('MainToolbar'); tb.setMovable(False); tb.setIconSize(QtCore.QSize(18,18))
         tb.addAction(self.a_open); tb.addAction(self.a_save); tb.addAction(self.a_fit_run); tb.addSeparator()
         tb.addWidget(QtWidgets.QLabel(' Run '))
-        self.run_selector=QtWidgets.QComboBox(); self.run_selector.setMinimumContentsLength(14); self.run_selector.setMinimumWidth(180); self.run_selector.setToolTip('Active telemetry session'); self.run_selector.currentIndexChanged.connect(self._toolbar_run_changed); tb.addWidget(self.run_selector)
+        self.run_selector=QtWidgets.QComboBox(); self.run_selector.setMinimumContentsLength(14); self.run_selector.setMinimumWidth(180); self.run_selector.setToolTip('Active run data log'); self.run_selector.currentIndexChanged.connect(self._toolbar_run_changed); tb.addWidget(self.run_selector)
         tb.addSeparator(); tb.addWidget(QtWidgets.QLabel(' X '))
         self.xmode=QtWidgets.QComboBox(); self.xmode.addItems(['Time from Launch','Distance from Launch','Normalized Run %','Logger Time','Sample Index']); self.xmode.currentTextChanged.connect(self._xmode_changed); tb.addWidget(self.xmode)
         tb.addSeparator(); self.compare_box=QtWidgets.QCheckBox('Compare'); self.compare_box.setChecked(False); self.compare_box.stateChanged.connect(self._compare_changed); tb.addWidget(self.compare_box)
@@ -3638,6 +3679,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.catalog_run_details=CatalogRunDetails(self.catalog);self.run_browser.runSelectionChanged.connect(self.catalog_run_details.set_run)
         d=QtWidgets.QDockWidget('Canonical Run Record',self);d.setObjectName('CatalogRunDetailsDock');d.setWidget(self.catalog_run_details);self.addDockWidget(QtCore.Qt.RightDockWidgetArea,d);canonical_dock=d
         self.run_workspace=RunWorkspacePanel(self.catalog);self.run_browser.runSelectionChanged.connect(self.run_workspace.set_run);self.run_workspace.openRunRequested.connect(self._open_catalog_run);self.run_workspace.attachTelemetryRequested.connect(self._attach_local_telemetry_to_run);self.run_workspace.applyProfileRequested.connect(self._apply_profile_to_catalog_run);self.run_workspace.generateReportRequested.connect(self._generate_standard_run_report)
+        self.run_browser.runSelectionChanged.connect(self._catalog_run_selected)
         d=QtWidgets.QDockWidget('Run Workspace',self);d.setObjectName('RunWorkspaceDock');d.setWidget(self.run_workspace);self.addDockWidget(QtCore.Qt.RightDockWidgetArea,d);self.tabifyDockWidget(canonical_dock,d);d.raise_()
         # Sessions / compare sets
         self.session_tree=SessionDock(self.store); self.session_tree.activeRequested.connect(self.store.set_active); self.session_tree.roleChanged.connect(self._role_changed); self.session_tree.alignmentChanged.connect(self._alignment_changed); self.session_tree.autoAlignRequested.connect(self._auto_align_session); self.session_tree.renameRequested.connect(self._rename_session); self.session_tree.removeRequested.connect(self._remove_session)
@@ -3748,7 +3790,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ('Add FFT / PSD Spectrum',lambda:self.current_sheet().add_spectrum()),('Add Load / Heat Map',lambda:self.current_sheet().add_load_map()),('Add Segment / KPI Report',lambda:self.current_sheet().add_metric_report()),('Add NHRA Strip / Model Residuals',lambda:self.current_sheet().add_strip_model()),('Add Multi-Run Envelope',lambda:self.current_sheet().add_envelope()),
             ('Add Reference Delta',lambda:self.current_sheet().add_delta()),('Add Run Comparison Summary',lambda:self.current_sheet().add_comparison_summary()),('Add Alarm Status',lambda:self.current_sheet().add_alarm_status()),('Add A-B Region Statistics',lambda:self.current_sheet().add_region_stats()),('Add Sensor Health',lambda:self.current_sheet().add_sensor_health()),
             ('Pro Stock Shift Report…',self._pro_stock_shift_report),('Calculated Channel…',self._new_math_channel),('Data Gate…',self._new_data_gate),('Reconstruct Delivered Power…',self._reconstruct_power),
-            ('Inference Center…',self._inference_center),('Create Compare Run…',self._create_compare_run),('Save Current Compare Set…',self._save_current_compare_set),('Apply Named Compare Set…',self._apply_named_compare_set),('Next Reference Run',lambda:self._step_compare_reference(1)),('Previous Reference Run',lambda:self._step_compare_reference(-1)),('Simulation Study Center…',self._simulation_study_center),('Capture Vehicle Model Snapshot…',self._capture_model_snapshot),('Engineering History…',self._engineering_history),('Sync NHRA Tech Services Data…',self._sync_tech_services_data),('Attach Local Telemetry to Selected Run…',self._attach_local_telemetry_to_selected_run),('Keep Active Asset Offline',self._keep_active_offline),
+            ('Inference Center…',self._inference_center),('Create Compare Run…',self._create_compare_run),('Save Current Compare Set…',self._save_current_compare_set),('Apply Named Compare Set…',self._apply_named_compare_set),('Next Reference Run',lambda:self._step_compare_reference(1)),('Previous Reference Run',lambda:self._step_compare_reference(-1)),('Simulation Study Center…',self._simulation_study_center),('Capture Vehicle Model Snapshot…',self._capture_model_snapshot),('Engineering History…',self._engineering_history),('Sync NHRA Tech Services Data…',self._sync_tech_services_data),('Attach Data Log to Selected Run…',self._attach_local_telemetry_to_selected_run),('Keep Active Asset Offline',self._keep_active_offline),
             ('Run Import / Plot Data Self-Test…',self._run_data_selftest),('Open Diagnostic Log Folder',self._open_log_folder),
         ]
         labels=[x[0] for x in commands]
@@ -4840,7 +4882,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _attach_local_telemetry_to_selected_run(self):
         run_id=self.run_browser.selected_run_id() if hasattr(self,'run_browser') else ''
         if not run_id:
-            QtWidgets.QMessageBox.information(self,'Attach Local Telemetry','Select an authoritative Run in the NHRA Tech Services Runs browser first.')
+            QtWidgets.QMessageBox.information(self,'Attach Data Log','Select an authoritative Run in the NHRA Tech Services Runs browser first.')
             return
         self._attach_local_telemetry_to_run(run_id)
 
@@ -4853,13 +4895,13 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         record=self.catalog.get_run(run_id)
         if record is None:
-            QtWidgets.QMessageBox.warning(self,'Attach Local Telemetry',f'Run {run_id} was not found in the local catalog.')
+            QtWidgets.QMessageBox.warning(self,'Attach Data Log',f'Run {run_id} was not found in the local catalog.')
             return
         files,_=QtWidgets.QFileDialog.getOpenFileNames(
             self,
-            f"Attach telemetry — {record.get('driver_name') or ''} {record.get('round') or ''}".strip(),
+            f"Attach data log — {record.get('driver_name') or ''} {record.get('round') or ''}".strip(),
             '',
-            'Supported telemetry (*.ld *.rpk *.ddf *.csv *.tsv *.txt *.log *.maxxlog *.MaxxECU-log *.ftlog *.ftml *.zip *.bin *.vbo *.msl *.mlg *.xlsx *.xlsm *.dl *.dlz *.bigTune *.big);;All files (*.*)'
+            'Supported data logs (*.ld *.rpk *.ddf *.csv *.tsv *.txt *.log *.maxxlog *.MaxxECU-log *.ftlog *.ftml *.zip *.bin *.vbo *.msl *.mlg *.xlsx *.xlsm *.dl *.dlz *.bigTune *.big);;All files (*.*)'
         )
         files=[str(Path(x)) for x in files if x and Path(x).is_file()]
         if not files:return
@@ -4897,9 +4939,30 @@ class MainWindow(QtWidgets.QMainWindow):
             if timing:inherited.append('official timing')
             if record.get('weather'):inherited.append('official weather')
             context=', '.join(inherited) if inherited else 'canonical Run identity'
-            self.statusBar().showMessage(f'Attached {opened} local telemetry file(s) to selected Run; inherited {context}.',8000)
+            self.statusBar().showMessage(f'Attached {opened} data log(s) to selected Run; inherited {context}. The association is stored locally.',8000)
         if errors:
-            QtWidgets.QMessageBox.warning(self,'Attach Local Telemetry','Some files could not be attached:\n\n'+'\n'.join(errors))
+            QtWidgets.QMessageBox.warning(self,'Attach Data Log','Some files could not be attached:\n\n'+'\n'.join(errors))
+
+    def _catalog_run_selected(self, run_id: str):
+        """Keep the waveform/session context aligned with the selected canonical Run.
+
+        Selection never performs a heavy disk decode on its own. If a data log
+        for that Run is already loaded, it is reactivated immediately. If the
+        association only exists in the persistent local catalog, the Run
+        Workspace exposes it and Open Data loads it on demand.
+        """
+        rid=str(run_id or '')
+        if not rid:
+            return
+        handle=next((h for h in self.store.runs if str(h.catalog_run_id or '')==rid),None)
+        if handle is not None and handle is not self.store.active:
+            try:self.store.set_active(self.store.runs.index(handle))
+            except ValueError:pass
+            return
+        if handle is None:
+            logs=[a for a in self.catalog.list_assets(rid) if a.get('asset_type')=='telemetry']
+            if logs:
+                self.statusBar().showMessage(f"{len(logs)} data log(s) attached to this Run — double-click the Run or choose Open Data to load.",3500)
 
     def _active_handle_for_catalog_run(self, run_id: str) -> Optional[RunHandle]:
         rid=str(run_id or '')
@@ -4913,7 +4976,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if h is None:
             self._open_catalog_run(run_id);h=self._active_handle_for_catalog_run(run_id)
         if h is None:
-            QtWidgets.QMessageBox.information(self,'Run Workspace','Attach or open telemetry for this Run before applying a waveform layout.');return
+            QtWidgets.QMessageBox.information(self,'Run Workspace','Attach or open a data log for this Run before applying a waveform layout.');return
         try:self.store.set_active(self.store.runs.index(h))
         except Exception:pass
         self._apply_standard_profile_layout(profile_key)
@@ -4924,7 +4987,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if h is None:
             self._open_catalog_run(run_id);h=self._active_handle_for_catalog_run(run_id)
         if h is None:
-            QtWidgets.QMessageBox.information(self,'Run Report','Attach or open telemetry for this Run before generating a report.');return
+            QtWidgets.QMessageBox.information(self,'Run Report','Attach or open a data log for this Run before generating a report.');return
         try:self.store.set_active(self.store.runs.index(h))
         except Exception:pass
         try:
@@ -4945,7 +5008,7 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self,'Run Browser',f'Run {run_id} was not found in the local catalog.');return
         assets=[a for a in self.catalog.list_assets(run_id) if a.get('asset_type')=='telemetry']
         if not assets:
-            QtWidgets.QMessageBox.information(self,'Run Browser','This run does not yet have a telemetry asset attached.');return
+            QtWidgets.QMessageBox.information(self,'Run Browser','This Run does not yet have a data log attached.');return
         errors=[];opened=0;existing_count=0
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         try:
@@ -5218,7 +5281,7 @@ class MainWindow(QtWidgets.QMainWindow):
             'Delimited:\n'
             '  • CSV / TSV / TXT / LOG exports.\n\n'
             'Authoritative Run workflow:\n'
-            '  • Sync Tech Services Events/Runs, select the exact Run, then use Attach Local Telemetry… to bind local evidence explicitly.\n'
+            '  • Sync Tech Services Events/Runs, select the exact Run, then use Attach Data Log… to bind the local run data explicitly.\n'
             '  • Attachments are copied into Velocity managed storage, inherit official timing/weather when available, and are never uploaded or matched by filename.\n\n'
             'Recognized but intentionally not decoded yet:\n'
             '  • FuelTech .ftlog / .ftml — use CSV or MoTeC .ld export until a native decoder is validated.\n\n'
@@ -5265,7 +5328,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.statusBar().showMessage(f'Opened {opened} log(s) — {Path(h.path).name} — {len(report.default_channels)} default trace(s) selected',8000)
 
     def open_logs(self):
-        files,_=QtWidgets.QFileDialog.getOpenFileNames(self,'Open telemetry logs','', 'Supported telemetry (*.ld *.rpk *.ddf *.csv *.tsv *.txt *.log *.maxxlog *.MaxxECU-log *.ftlog *.ftml *.zip *.bin *.vbo *.msl *.mlg *.xlsx *.xlsm *.dl *.dlz *.bigTune *.big);;MoTeC (*.ld);;RacePak (*.rpk *.ddf *.bin);;MaxxECU (*.maxxlog *.MaxxECU-log *.zip);;FuelTech (*.ftlog *.ftml *.csv *.ld);;Delimited exports (*.csv *.tsv *.txt *.log);;All files (*.*)')
+        files,_=QtWidgets.QFileDialog.getOpenFileNames(self,'Open data logs','', 'Supported data logs (*.ld *.rpk *.ddf *.csv *.tsv *.txt *.log *.maxxlog *.MaxxECU-log *.ftlog *.ftml *.zip *.bin *.vbo *.msl *.mlg *.xlsx *.xlsm *.dl *.dlz *.bigTune *.big);;MoTeC (*.ld);;RacePak (*.rpk *.ddf *.bin);;MaxxECU (*.maxxlog *.MaxxECU-log *.zip);;FuelTech (*.ftlog *.ftml *.csv *.ld);;Delimited exports (*.csv *.tsv *.txt *.log);;All files (*.*)')
         self._open_paths(files)
 
     def _open_bundled_demos(self):
@@ -5278,15 +5341,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._open_paths([str(p) for p in demos])
 
     def open_log_folder(self):
-        folder=QtWidgets.QFileDialog.getExistingDirectory(self,'Open folder of telemetry logs')
+        folder=QtWidgets.QFileDialog.getExistingDirectory(self,'Open folder of data logs')
         if not folder:return
         root=Path(folder)
         files=sorted((p for p in root.rglob('*') if p.is_file() and telemetry_file_candidate(p)), key=lambda p:str(p).lower())
         if not files:
-            QtWidgets.QMessageBox.information(self,'No telemetry logs found',f'No recognized telemetry files were found under:\n{root}')
+            QtWidgets.QMessageBox.information(self,'No data logs found',f'No recognized data-log files were found under:\n{root}')
             return
         if len(files)>1:
-            answer=QtWidgets.QMessageBox.question(self,'Open telemetry folder',f'Found {len(files)} candidate telemetry files under:\n{root}\n\nOpen them now?')
+            answer=QtWidgets.QMessageBox.question(self,'Open data-log folder',f'Found {len(files)} candidate data-log files under:\n{root}\n\nOpen them now?')
             if answer!=QtWidgets.QMessageBox.Yes:return
         self._open_paths([str(p) for p in files])
 

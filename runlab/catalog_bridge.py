@@ -97,8 +97,10 @@ def register_opened_telemetry(
         metadata.update({
             "attachment_mode":"local_working_copy",
             "canonical_run_id":str(run_id),
+            "local_persistence":True,
+            "persistence_scope":"velocity_local_catalog",
             "server_persistence":False,
-            "authority_note":"Locally managed telemetry associated by the user with an authoritative NHRA Tech Services Run; not uploaded to Tech Services.",
+            "authority_note":"Locally managed run data associated by the user with an authoritative NHRA Tech Services Run; persists in Velocity local storage and is not uploaded to Tech Services.",
         })
     run_id,asset_id,session_id=catalog.register_telemetry_file(
         path, run_id=run_id, vendor=run.vendor, display_name=run.name, channel_summary=channel_summary(run),

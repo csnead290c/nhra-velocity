@@ -1,5 +1,16 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.10 — trackside waveform + Run-browser usability
+
+- Changed the waveform cursor to the established ATLAS-style interaction: **click to position**, **drag the vertical cursor line to scrub**, and arrow keys for sample-precise movement. Merely hovering over a graph no longer moves the engineering cursor. Shift-click and Ctrl-click continue to place A/B cursors.
+- Mouse-wheel and normal plot navigation now operate on the **X axis only** in Waveform displays. Y remains auto-scaled (or explicitly set in Trace Properties), preventing accidental vertical rescaling while reviewing a pass.
+- Reworked the waveform live-value table into a denser readout: smaller rows, up to seven immediately visible channels, and only Channel / Unit / Cursor / Ref / Δ shown by default. Min / Max / Mean / Std remain available under **More → Readout columns**.
+- Renamed the everyday source-file workflow from *telemetry* to **data log** throughout the primary UI. The application title is now **NHRA Velocity — Data Analysis**. Internal telemetry/data-model terminology remains unchanged where technically appropriate.
+- Simplified the NHRA Tech Services Run browser: opaque `tech-services:<UUID>` values are no longer displayed as Run names; rows use Run number / car number / lane / time context instead, and a dedicated **Data** column makes attached Run data obvious.
+- The Run browser now defaults to **Latest event** for a compact trackside view, with **All events** one click away. Entering a search automatically spans all synchronized events.
+- Strengthened the local Run-data association UX. Selecting a canonical Run reactivates its already-loaded data log, locally managed Run data is visibly marked, and attachment metadata explicitly records local persistence. Added regression coverage proving the canonical Run → managed data-log link survives closing and reopening the local catalog.
+- Removed a duplicate `add_channel` method declaration found during the usability cleanup.
+
 ## v0.38.0-dev.9 — manual launch re-zero + Run-browser polish
 
 - Added an explicit waveform **Zero** control. Place the cursor at the true launch point and choose **Set Cursor as Launch (T=0)**; every Time/Distance-from-Launch view, drag-run fit window and official beam overlay then uses the corrected launch anchor without modifying raw logger samples or NHRA official timing.

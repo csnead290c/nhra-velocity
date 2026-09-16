@@ -40,3 +40,35 @@ def test_waveform_exposes_manual_launch_rezero_control():
     assert 'Zero: Manual' in source
     assert 'Refresh View' in source
     assert 'Sync Tech Services' in source
+
+
+def test_waveform_cursor_and_zoom_follow_atlas_style_interaction():
+    source = Path(__file__).resolve().parents[1].joinpath('desktop.py').read_text(encoding='utf-8')
+    # Hover should never move the engineering cursor; click positions it and
+    # the InfiniteLine remains movable for click/drag scrubbing.
+    assert 'sigMouseMoved' not in source
+    assert 'sigMouseClicked.connect(self._scene_mouse_clicked)' in source
+    assert "cursor = pg.InfiniteLine(angle=90, movable=True" in source
+    # Waveform mouse interactions intentionally affect X only; Y scaling is
+    # controlled by auto-range / trace properties rather than accidental wheel zoom.
+    assert "p.setMouseEnabled(x=True, y=False)" in source
+
+
+def test_run_browser_hides_opaque_remote_ids_and_surfaces_data_logs():
+    source = Path(__file__).resolve().parents[1].joinpath('desktop.py').read_text(encoding='utf-8')
+    block = source.split('class RunBrowser',1)[1].split('class AnalysisCaseBrowser',1)[0]
+    assert "_friendly_run_label" in block
+    assert "data_log_count" in block
+    assert "local_data_log_count" in block
+    assert "Attach Data Log…" in block
+    assert "run_label=(r.get('run_key')" not in block
+
+
+def test_waveform_readout_defaults_to_compact_columns():
+    source = Path(__file__).resolve().parents[1].joinpath('desktop.py').read_text(encoding='utf-8')
+    block = source.split('class WaveformDisplay',1)[1].split('class ValuesDisplay',1)[0]
+    assert 'self.show_stat_min = False' in block
+    assert 'self.show_stat_max = False' in block
+    assert 'self.show_stat_mean = False' in block
+    assert "readout_columns=more.addMenu('Readout columns')" in block
+    assert 'setDefaultSectionSize(19)' in block

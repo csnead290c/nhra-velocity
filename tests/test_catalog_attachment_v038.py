@@ -109,3 +109,50 @@ def test_local_attachment_requires_explicit_run_identity(tmp_path: Path):
         assert "explicit canonical run_id" in str(exc)
     else:
         raise AssertionError("local attachment must fail closed without an explicit Run")
+
+
+def test_local_run_data_attachment_persists_across_catalog_reopen(tmp_path: Path):
+    db_path = tmp_path / "catalog.sqlite"
+    object_root = tmp_path / "objects"
+    catalog = LocalCatalog(path=db_path, object_store=LocalObjectStore(object_root))
+    event_id = catalog.create_event("Persistence Test", season=2026, remote_id="evt-persist", sync_state="synced")
+    run_id = catalog.create_run(
+        event_id=event_id,
+        run_key="tech-services:run-persist",
+        round="Q1",
+        category="PRO STOCK",
+        car_number="7",
+        remote_id="run-persist",
+        sync_state="synced",
+    )
+    source = tmp_path / "persistent-log.csv"
+    source.write_text("time,engine_rpm\n0,5000\n0.1,6000\n")
+    decoded = TelemetryRun(
+        name="persistent-log",
+        data=pd.DataFrame({"time_s": [0.0, 0.1], "engine_rpm": [5000.0, 6000.0]}),
+        channel_map={"time_s": "time_s", "engine_rpm": "engine_rpm"},
+        vendor="generic",
+    )
+    _, asset_id, _ = register_opened_telemetry(
+        catalog, str(source), decoded, run_id=run_id, managed=True, local_attachment=True
+    )
+    first = catalog.get_asset(asset_id)
+    assert first is not None
+    managed_path = Path(first["local_path"])
+    assert managed_path.is_file()
+    assert first["metadata"]["local_persistence"] is True
+    assert first["metadata"]["persistence_scope"] == "velocity_local_catalog"
+
+    # Simulate leaving/reopening Velocity: a new LocalCatalog instance must
+    # retain the exact canonical Run -> local managed data-log association.
+    reopened = LocalCatalog(path=db_path, object_store=LocalObjectStore(object_root))
+    assets = [a for a in reopened.list_assets(run_id) if a.get("asset_type") == "telemetry"]
+    assert len(assets) == 1
+    assert assets[0]["id"] == asset_id
+    assert Path(assets[0]["local_path"]).is_file()
+    assert assets[0]["storage_mode"] == "managed"
+
+    run_rows = reopened.list_runs(event_id=event_id)
+    assert len(run_rows) == 1
+    assert run_rows[0]["data_log_count"] == 1
+    assert run_rows[0]["local_data_log_count"] == 1

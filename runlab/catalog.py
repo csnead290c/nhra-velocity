@@ -1098,7 +1098,9 @@ class LocalCatalog:
             token=f"%{search.strip()}%";where.append("(r.run_key LIKE ? OR r.round LIKE ? OR r.category LIKE ? OR r.car_number LIKE ? OR d.name LIKE ? OR v.name LIKE ? OR e.name LIKE ?)");args.extend([token]*7)
         sql="""SELECT r.id,r.event_id,r.run_key,r.round,r.run_number,r.lane,r.category,r.car_number,r.run_datetime,r.sync_state,r.timing_provenance,r.weather_provenance,r.official_timing_json,
             e.name AS event_name,d.name AS driver_name,v.name AS vehicle_name,COUNT(DISTINCT a.id) AS asset_count,
-            SUM(CASE WHEN a.storage_mode='managed' THEN 1 ELSE 0 END) AS offline_asset_count
+            SUM(CASE WHEN a.storage_mode='managed' THEN 1 ELSE 0 END) AS offline_asset_count,
+            SUM(CASE WHEN a.asset_type='telemetry' THEN 1 ELSE 0 END) AS data_log_count,
+            SUM(CASE WHEN a.asset_type='telemetry' AND a.storage_mode='managed' THEN 1 ELSE 0 END) AS local_data_log_count
             FROM runs r LEFT JOIN events e ON e.id=r.event_id LEFT JOIN drivers d ON d.id=r.driver_id LEFT JOIN vehicles v ON v.id=r.vehicle_id LEFT JOIN assets a ON a.run_id=r.id"""
         if where: sql += " WHERE " + " AND ".join(where)
         sql += " GROUP BY r.id ORDER BY COALESCE(r.run_datetime,r.created_at) DESC LIMIT ?";args.append(int(limit))
