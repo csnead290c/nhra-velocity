@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 import base64
 import hashlib
 import json
+import os
 import secrets
 from typing import Any, Mapping, Optional, Protocol, Sequence, runtime_checkable
 
@@ -220,7 +221,17 @@ class KeyringCredentialStore:
         return f"{self.service_prefix}.{provider}"
 
     def save(self, provider: str, account: str, payload: Mapping[str, Any]) -> None:
-        self._keyring().set_password(self._service(provider), account, json.dumps(dict(payload), separators=(",", ":")))
+        raw = json.dumps(dict(payload), separators=(",", ":"))
+        # Windows Credential Manager caps a generic credential blob at 2560
+        # bytes.  The Windows keyring backend stores text as UTF-16, so catch
+        # an oversized session before CredWrite turns it into the cryptic
+        # WinError 1783 ("The stub received bad data").
+        if os.name == "nt" and len(raw.encode("utf-16-le")) > 2560:
+            raise RuntimeError(
+                "The secure Tech Services session is too large for Windows Credential Manager. "
+                "NHRA Velocity will not fall back to plaintext credential storage."
+            )
+        self._keyring().set_password(self._service(provider), account, raw)
 
     def load(self, provider: str, account: str) -> Optional[dict[str, Any]]:
         raw = self._keyring().get_password(self._service(provider), account)
@@ -262,10 +273,15 @@ class AuthManager:
         self.session = session
         persist_access = bool(getattr(self.provider, "persist_access_token", False))
         if persist and self.credential_store and (session.tokens.refresh_token or persist_access):
+            payload_factory = getattr(self.provider, "credential_payload", None)
+            if callable(payload_factory):
+                payload = dict(payload_factory(session))
+            else:
+                payload = session.to_secret_payload(include_access_token=persist_access)
             self.credential_store.save(
                 self.provider.provider_name,
                 self.credential_account,
-                session.to_secret_payload(include_access_token=persist_access),
+                payload,
             )
 
     def restore(self) -> bool:

@@ -1,14 +1,16 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.6**
+Validated build: **0.38.0-dev.7**
 
 ## Scope
 
-This validation covers the usability/progressive-disclosure pass on top of the v0.38 Run-first engineering workspace, catalog schema v8 standardized Run reports, class/RSA profile presentation, authoritative Tech Services timing/weather hydration, direct DDF/Holley/RacePak telemetry support, and the existing read-only Tech Services integration. No changes were made to the `nhratechservices` repository or server data.
+This validation covers the Windows Tech Services sign-in persistence fix on top of the v0.38 simplified Run-first engineering workspace, catalog schema v8 standardized Run reports, authoritative Tech Services timing/weather hydration, and direct logger support. No changes were made to the `nhratechservices` repository or server data.
 
 ## Results
 
-- **221/221 automated tests passed** (`PYTHONPATH=. pytest -q`).
+- The previous dev.6 baseline completed **221/221 automated tests**.
+- The dev.7 authentication/Tech Services delta completed **20/20 focused regression tests** (`test_auth`, `test_tech_services_auth`, `test_tech_services_http`, `test_tech_services_metadata`, `test_authorized_transport`).
+- A full-suite rerun was attempted in this constrained environment but exceeded the execution window before reporting a failure; no failed test was observed before timeout.
 - `python -m compileall -q .` passed.
 - **3/3 bundled native import/plot pipelines passed**:
   - RacePak/DataLink `.rpk`
@@ -18,6 +20,20 @@ This validation covers the usability/progressive-disclosure pass on top of the v
   - RacingSystemsAnalysis `1556ac70684908038fe47a9fe54e2f506cc4e71c`
   - nhratechservices `77eb280fe94825f93f2cdfdd3ab2568851aa6a19`
 - Release audit findings: **0 errors / 0 warnings**.
+
+
+## Windows Tech Services sign-in regression
+
+Focused validation covers:
+
+- provider-specific compact credential payloads that omit persisted identity/capability duplication;
+- secure restore of the cached seven-day access token followed by live identity/capability refresh;
+- payload size staying below the Windows generic Credential Manager blob limit in the qualified test case;
+- no password field in the persisted payload;
+- authorization/capability behavior remaining unchanged after restore;
+- continued fail-closed behavior with no plaintext credential fallback.
+
+The desktop sign-in path also now distinguishes server authentication from credential-vault persistence: a vault write problem does not report a false bad-login failure or discard the already-authenticated in-memory session.
 
 ## Usability / progressive-disclosure validation
 

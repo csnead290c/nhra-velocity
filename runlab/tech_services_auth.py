@@ -90,6 +90,20 @@ class WebsiteTechServicesAuthProvider:
         token = session.tokens.access_token if session is not None else ""
         return self._client(token)
 
+    def credential_payload(self, session: AuthSession) -> dict[str, Any]:
+        """Return the smallest restorable secret for the OS credential vault.
+
+        Identity, role and capabilities are deliberately not persisted: they
+        are refreshed from Tech Services whenever the token is restored.  This
+        also keeps owner/admin sessions comfortably below the Windows
+        Credential Manager generic-credential blob limit.
+        """
+        return {
+            "schema": 1,
+            "access_token": session.tokens.access_token,
+            "expires_at_utc": float(session.tokens.expires_at_utc),
+        }
+
     def sign_in(self, *, email: str, password: str) -> AuthSession:
         response = self._client().login(email=email, password=password)
         token = str(response.get("token") or "").strip()

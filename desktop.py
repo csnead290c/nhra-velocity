@@ -4162,10 +4162,20 @@ class MainWindow(QtWidgets.QMainWindow):
         user=email.text().strip();secret=password.text()
         if not user or not secret:
             QtWidgets.QMessageBox.warning(self,'Tech Services sign-in','Email and password are required.');return False
+        persistence_error=None
         try:
             QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
             session=self.auth_provider.sign_in(email=user,password=secret)
-            self.auth.set_session(session,persist=True)
+            try:
+                self.auth.set_session(session,persist=True)
+            except Exception as exc:
+                # Authentication already succeeded.  A credential-vault
+                # problem must not masquerade as a bad username/password or
+                # throw away the valid in-memory session.  Continue for this
+                # launch and tell the user that sign-in could not be remembered.
+                persistence_error=exc
+                logging.exception('Tech Services session persistence failed')
+                self.auth.set_session(session,persist=False)
         except Exception as exc:
             logging.exception('Tech Services sign-in failed')
             QtWidgets.QMessageBox.warning(self,'Tech Services sign-in',str(exc));return False
@@ -4177,6 +4187,14 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self,'Tech Services sign-in','The account authenticated, but its current Tech Services capabilities do not include NHRA Velocity desktop access.')
             return False
         self.statusBar().showMessage(f'Signed in to NHRA Tech Services as {session.identity.display_name or session.identity.email}.',5000)
+        if persistence_error is not None:
+            QtWidgets.QMessageBox.information(
+                self,
+                'Tech Services sign-in',
+                'Sign-in succeeded, but Windows could not securely remember this session.\n\n'
+                'You can continue using NHRA Velocity now, but you may need to sign in again the next time the app starts.\n\n'
+                f'Detail: {persistence_error}',
+            )
         return True
 
     def _sign_out(self):

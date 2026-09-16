@@ -1,5 +1,13 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.7 — Windows Tech Services sign-in fix
+
+- Fixed Windows Credential Manager failure (`CredWrite`, WinError 1783) seen after a valid Tech Services login, especially for owner/admin accounts with large capability sets.
+- Tech Services credential persistence now stores only the minimum restorable secret: the seven-day access token and its expiry. Identity, role and capabilities are refreshed from the server on restore rather than duplicated in the Windows credential blob.
+- Added an explicit Windows credential-size guard so an oversized vault payload produces a useful error instead of the cryptic OS error.
+- A credential-vault write failure no longer masquerades as a bad login. If the server authenticated successfully, Velocity keeps the in-memory session active and explains that the user may need to sign in again next launch.
+- Password handling is unchanged: the password is never persisted. No plaintext credential fallback was added.
+
 ## RacePak raw DDF import
 
 - Added direct decoding of RacePak `.DDF` logger files so supported raw recordings no longer require DataLink conversion to `.RPK` before analysis.

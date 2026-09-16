@@ -63,7 +63,14 @@ def test_website_provider_login_maps_server_capabilities_and_securely_restores_t
         mgr.set_session(signed)
         payload=store.load(provider.provider_name,"default")
         assert payload["access_token"]
+        assert payload["schema"] == 1
         assert "password" not in payload
+        assert "identity" not in payload
+        assert "token_scopes" not in payload
+        # Owner/admin accounts can carry a long capability list.  The vault
+        # payload must stay compact because Windows Credential Manager has a
+        # small generic-credential blob limit.
+        assert len(json.dumps(payload,separators=(",", ":")).encode("utf-16-le")) < 2560
 
         restored=AuthManager(provider,store)
         assert restored.restore()
