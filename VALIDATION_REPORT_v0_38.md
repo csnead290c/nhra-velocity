@@ -1,16 +1,16 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.7**
+Validated build: **0.38.0-dev.8**
 
 ## Scope
 
-This validation covers the Windows Tech Services sign-in persistence fix on top of the v0.38 simplified Run-first engineering workspace, catalog schema v8 standardized Run reports, authoritative Tech Services timing/weather hydration, and direct logger support. No changes were made to the `nhratechservices` repository or server data.
+This validation covers the staged/background NHRA Tech Services synchronization and account/access UX fixes on top of the v0.38 simplified Run-first engineering workspace, catalog schema v8 standardized Run reports, authoritative Tech Services timing/weather hydration, and direct logger support. No changes were made to the `nhratechservices` repository or server data.
 
 ## Results
 
-- The previous dev.6 baseline completed **221/221 automated tests**.
-- The dev.7 authentication/Tech Services delta completed **20/20 focused regression tests** (`test_auth`, `test_tech_services_auth`, `test_tech_services_http`, `test_tech_services_metadata`, `test_authorized_transport`).
-- A full-suite rerun was attempted in this constrained environment but exceeded the execution window before reporting a failure; no failed test was observed before timeout.
+- The dev.8 full automated suite completed **223/223 tests**.
+- New regression coverage verifies current-event prioritization and most-recent-completed-event fallback when the calendar is between events.
+- The authentication/security regression now verifies that source/development execution is protected by default unless the explicit development bypass is set.
 - `python -m compileall -q .` passed.
 - **3/3 bundled native import/plot pipelines passed**:
   - RacePak/DataLink `.rpk`
@@ -21,6 +21,18 @@ This validation covers the Windows Tech Services sign-in persistence fix on top 
   - nhratechservices `77eb280fe94825f93f2cdfdd3ab2568851aa6a19`
 - Release audit findings: **0 errors / 0 warnings**.
 
+
+## Staged/background Tech Services sync regression
+
+Validation covers:
+
+- current event prioritized first when today falls inside an event window;
+- most recently completed event prioritized first when between events;
+- per-event metadata synchronization preserving the existing idempotent catalog behavior;
+- first-event completion refreshing the Run browser before the season-wide worker finishes;
+- remaining event hydration running on a Qt worker thread rather than the GUI thread;
+- source builds requiring Tech Services authorization by default;
+- explicit `NHRA_TECH_DEV_UNAUTHENTICATED=1` bypass remaining available for controlled development/CI.
 
 ## Windows Tech Services sign-in regression
 

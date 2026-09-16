@@ -1,7 +1,7 @@
 from runlab.security import desktop_auth_required
 
-def test_source_development_is_not_locked_by_default():
-    assert desktop_auth_required(frozen=False,env={}) is False
+def test_source_development_requires_auth_by_default():
+    assert desktop_auth_required(frozen=False,env={}) is True
 
 def test_frozen_distribution_requires_auth_by_default():
     assert desktop_auth_required(frozen=True,env={}) is True

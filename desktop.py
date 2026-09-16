@@ -94,7 +94,9 @@ from runlab.definition_library import (
 from runlab.rule_events import evaluate_event_rules, alarm_states_at
 from runlab.auth import AuthManager, KeyringCredentialStore, AccessDenied
 from runlab.tech_services_auth import WebsiteTechServicesAuthProvider
-from runlab.tech_services_metadata import sync_tech_services_season
+from runlab.tech_services_metadata import (
+    MetadataSyncResult, fetch_tech_services_events, prioritize_tech_services_events, sync_tech_services_events,
+)
 from runlab.security import desktop_auth_required
 from runlab.simulation_study import ScenarioAxis, SimulationStudyDefinition, run_scenario_sweep, export_study_table, create_scenario_run, package_study_result
 from runlab.strip_analysis import analyze_strip
@@ -187,6 +189,51 @@ class RunHandle:
             except Exception:
                 return f"file:{self.path}"
         return f"scratch:{self.run.name}"
+
+
+class TechServicesSeasonSyncWorker(QtCore.QObject):
+    """Background Tech Services metadata sync with a useful-first event pass."""
+
+    firstEventReady = QtCore.Signal(object, str)
+    progress = QtCore.Signal(int, int, str)
+    finished = QtCore.Signal(object)
+    failed = QtCore.Signal(str)
+
+    def __init__(self, catalog, client, season_year: int, *, include_entries: bool = True, include_runs: bool = True):
+        super().__init__()
+        self.catalog = catalog
+        self.client = client
+        self.season_year = int(season_year)
+        self.include_entries = bool(include_entries)
+        self.include_runs = bool(include_runs)
+
+    @QtCore.Slot()
+    def run(self):
+        try:
+            events = prioritize_tech_services_events(fetch_tech_services_events(self.client, self.season_year))
+            total = MetadataSyncResult(season_year=self.season_year)
+            if not events:
+                self.finished.emit(total)
+                return
+            count = len(events)
+            for index, event in enumerate(events, start=1):
+                name = str(event.get('name') or event.get('event_code') or event.get('race_lookup') or 'NHRA Event')
+                part = sync_tech_services_events(
+                    self.catalog,
+                    self.client,
+                    self.season_year,
+                    [event],
+                    include_entries=self.include_entries,
+                    include_runs=self.include_runs,
+                )
+                total.merge(part)
+                if index == 1:
+                    self.firstEventReady.emit(part, name)
+                self.progress.emit(index, count, name)
+            self.finished.emit(total)
+        except Exception as exc:
+            logging.exception('Background Tech Services metadata sync failed')
+            self.failed.emit(str(exc))
 
 
 class SessionStore(QtCore.QObject):
@@ -3362,6 +3409,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # website exposes that contract. Metadata/timing sync uses existing GET
         # APIs; explicit local working attachments stay in Velocity only.
         self.tech_services=AuthorizedTechServicesTransport(UnboundTechServicesTransport(),self.auth,enforce=self.auth_required)
+        self._tech_sync_thread=None
+        self._tech_sync_worker=None
+        self._tech_sync_user_initiated=False
         self.simulation_studies=[]
         self.compare_sets=CompareSetLibrary()
         self.store=SessionStore(); self.cursors=CursorBus(); self.project_path:Optional[str]=None
@@ -3369,6 +3419,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worksheets=QtWidgets.QTabWidget(); self.worksheets.setTabsClosable(True); self.worksheets.setMovable(True); self.setCentralWidget(self.worksheets)
         self.worksheets.tabCloseRequested.connect(self._close_sheet)
         self._build_actions(); self._build_toolbar(); self._build_docks(); self._build_menus()
+        self._refresh_account_actions()
         self.add_worksheet('Data')
         self._apply_workspace_layout('simple')
         self.store.activeChanged.connect(self._active_changed)
@@ -4133,6 +4184,21 @@ class MainWindow(QtWidgets.QMainWindow):
         except AccessDenied as exc:
             QtWidgets.QMessageBox.warning(self,'NHRA Tech Services access required',str(exc));return False
 
+    def _refresh_account_actions(self):
+        status=self.auth.status()
+        # Only show the action that makes sense for the current state.  The
+        # account detail action remains available in either state.
+        self.a_signin.setVisible(not status.signed_in)
+        self.a_signin.setEnabled(not status.signed_in)
+        self.a_signout.setVisible(status.signed_in)
+        self.a_signout.setEnabled(status.signed_in)
+        ident=status.identity
+        if status.signed_in and ident:
+            label=ident.display_name or ident.email or 'Signed in'
+            self.a_account.setText(f'NHRA Tech Services Account — {label}…')
+        else:
+            self.a_account.setText('NHRA Tech Services Account…')
+
     def _show_account_access(self):
         status=self.auth.status();ident=status.identity
         lines=[
@@ -4195,41 +4261,109 @@ class MainWindow(QtWidgets.QMainWindow):
                 'You can continue using NHRA Velocity now, but you may need to sign in again the next time the app starts.\n\n'
                 f'Detail: {persistence_error}',
             )
+        self._refresh_account_actions()
+        QtCore.QTimer.singleShot(0,self._maybe_start_initial_sync)
         return True
 
     def _sign_out(self):
-        self.auth.sign_out();self.statusBar().showMessage('Signed out of NHRA Tech Services.',4000)
+        self.auth.sign_out();self._refresh_account_actions();self.statusBar().showMessage('Signed out of NHRA Tech Services.',4000)
 
     def _sync_tech_services_data(self):
         if not self.auth.status().online_access_valid:
             if not self._sign_in():return
-        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle('Sync NHRA Tech Services Data');dlg.resize(460,235)
+        if self._tech_sync_thread is not None:
+            self.statusBar().showMessage('NHRA Tech Services sync is already running in the background.',5000)
+            return
+        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle('Sync NHRA Tech Services Data');dlg.resize(500,255)
         form=QtWidgets.QFormLayout(dlg)
         year=QtWidgets.QSpinBox();year.setRange(2000,2100);year.setValue(time.gmtime().tm_year)
         entries=QtWidgets.QCheckBox('Tech Master event entries / roster');entries.setChecked(True)
         runs=QtWidgets.QCheckBox('Official timing runs + canonical weather');runs.setChecked(True)
-        note=QtWidgets.QLabel("This is a read-only pull from nhratechservices.com. Velocity will mirror Events, optional Entries, and official timing Runs into its local catalog, including the website's nearest canonical weather when available. It will not modify the website or infer missing Entry→Run relationships.")
+        note=QtWidgets.QLabel(
+            "Velocity now syncs the current or most recently completed event first. "
+            "As soon as that event is ready, its Runs appear in the browser and you can keep working while the rest of the season fills in quietly in the background. "
+            "This remains a read-only pull from nhratechservices.com."
+        )
         note.setWordWrap(True)
         form.addRow('Season',year);form.addRow('',entries);form.addRow('',runs);form.addRow(note)
         buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel);buttons.accepted.connect(dlg.accept);buttons.rejected.connect(dlg.reject);form.addRow(buttons)
         if dlg.exec()!=QtWidgets.QDialog.Accepted:return
+        self._start_tech_services_sync(year.value(),include_entries=entries.isChecked(),include_runs=runs.isChecked(),user_initiated=True)
+
+    def _maybe_start_initial_sync(self):
+        if self._tech_sync_thread is not None:return
+        if not self.auth.status().online_access_valid:return
         try:
-            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
-            client=self.auth_provider.client_for_session(self.auth.session)
-            result=sync_tech_services_season(self.catalog,client,year.value(),include_entries=entries.isChecked(),include_runs=runs.isChecked())
-            self.run_browser.refresh();self.asset_browser.refresh();self.case_browser.refresh();self.case_timeline.refresh();self.case_review.refresh()
-        except Exception as exc:
-            logging.exception('Tech Services metadata sync failed');QtWidgets.QMessageBox.critical(self,'Tech Services Sync',str(exc));return
-        finally:QtWidgets.QApplication.restoreOverrideCursor()
-        message=(f"Read-only Tech Services sync complete for {result.season_year}.\n\n"
-                 f"Events: {result.events_created} new / {result.events_updated} updated\n"
-                 f"Entries: {result.entries_created} new / {result.entries_existing} already present\n"
-                 f"Official timing Runs: {result.runs_created} new / {result.runs_updated} updated\n"
-                 f"Runs with canonical weather: {result.runs_with_weather}")
-        if result.weather_fallback_events:message+=f"\nEvents using timing-only fallback: {result.weather_fallback_events}"
-        if result.events_without_race_lookup:message+=f"\nEvents without race_lookup: {result.events_without_race_lookup}"
-        if result.warnings:message+='\n\nWarnings:\n'+'\n'.join(result.warnings[:12])
-        QtWidgets.QMessageBox.information(self,'Tech Services Sync',message)
+            has_runs=bool(self.catalog.list_runs(limit=1))
+        except Exception:
+            has_runs=True
+        if has_runs:return
+        year=time.gmtime().tm_year
+        self.statusBar().showMessage('First launch: loading the most useful NHRA Tech Services event…')
+        self._start_tech_services_sync(year,include_entries=True,include_runs=True,user_initiated=False)
+
+    def _start_tech_services_sync(self,season_year:int,*,include_entries=True,include_runs=True,user_initiated=False):
+        if self._tech_sync_thread is not None:return
+        if not self.auth.status().online_access_valid:
+            return
+        client=self.auth_provider.client_for_session(self.auth.session)
+        thread=QtCore.QThread(self)
+        worker=TechServicesSeasonSyncWorker(
+            self.catalog,client,int(season_year),include_entries=include_entries,include_runs=include_runs
+        )
+        worker.moveToThread(thread)
+        self._tech_sync_thread=thread;self._tech_sync_worker=worker;self._tech_sync_user_initiated=bool(user_initiated)
+        self.a_site_sync.setEnabled(False)
+        worker.firstEventReady.connect(self._tech_sync_first_event_ready)
+        worker.progress.connect(self._tech_sync_progress)
+        worker.finished.connect(self._tech_sync_finished)
+        worker.failed.connect(self._tech_sync_failed)
+        worker.finished.connect(thread.quit);worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater);worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater);thread.finished.connect(self._tech_sync_cleanup)
+        thread.started.connect(worker.run)
+        self.statusBar().showMessage(f'Syncing {season_year}: loading current/latest event first…')
+        thread.start()
+
+    def _refresh_catalog_browsers(self):
+        self.run_browser.refresh();self.asset_browser.refresh();self.case_browser.refresh();self.case_timeline.refresh();self.case_review.refresh()
+
+    @QtCore.Slot(object,str)
+    def _tech_sync_first_event_ready(self,result,event_name):
+        self._refresh_catalog_browsers()
+        run_count=int(getattr(result,'run_count',0))
+        self.statusBar().showMessage(
+            f'{event_name} ready ({run_count:,} Runs). You can work now; the rest of the season is syncing in the background.',
+            12000,
+        )
+
+    @QtCore.Slot(int,int,str)
+    def _tech_sync_progress(self,current,total,event_name):
+        if current<=1:return
+        self.statusBar().showMessage(f'Background Tech Services sync: {current}/{total} events — {event_name}')
+
+    @QtCore.Slot(object)
+    def _tech_sync_finished(self,result):
+        self._refresh_catalog_browsers()
+        summary=(
+            f'Tech Services sync complete for {result.season_year}: '
+            f'{result.run_count:,} Runs processed, {result.runs_with_weather:,} with canonical weather.'
+        )
+        if result.warnings:
+            summary+=f' {len(result.warnings)} warning(s); see diagnostic log.'
+            for warning in result.warnings:
+                logging.warning('Tech Services sync: %s',warning)
+        self.statusBar().showMessage(summary,15000)
+
+    @QtCore.Slot(str)
+    def _tech_sync_failed(self,message):
+        QtWidgets.QMessageBox.critical(self,'Tech Services Sync',message)
+        self.statusBar().showMessage('NHRA Tech Services sync failed. See diagnostic log.',10000)
+
+    @QtCore.Slot()
+    def _tech_sync_cleanup(self):
+        self._tech_sync_thread=None;self._tech_sync_worker=None;self._tech_sync_user_initiated=False
+        self.a_site_sync.setEnabled(True)
 
 
     def _attach_rsa_model_channels(self):
@@ -5357,6 +5491,7 @@ def main():
         win.auth.restore()
     except Exception:
         logging.exception('Could not restore secure Tech Services session')
+    win._refresh_account_actions()
     if win.auth_required:
         status=win.auth.status()
         if not (status.online_access_valid or status.offline_access_valid):
@@ -5366,6 +5501,7 @@ def main():
                     'Sign-in was not completed, so the application will remain closed.')
                 return 4
     win.show()
+    QtCore.QTimer.singleShot(250,win._maybe_start_initial_sync)
     def _unhandled(exc_type, exc_value, exc_tb):
         logging.critical('Unhandled application exception', exc_info=(exc_type,exc_value,exc_tb))
         text=''.join(traceback.format_exception(exc_type,exc_value,exc_tb))

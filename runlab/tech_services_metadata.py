@@ -9,9 +9,10 @@ independently under the authoritative Event until the API exposes that bridge.
 """
 
 from dataclasses import dataclass, field
+from datetime import date, datetime
 import hashlib
 import json
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from .catalog import LocalCatalog
 from .official_runs import normalize_category
@@ -110,6 +111,18 @@ class MetadataSyncResult:
     def run_count(self) -> int:
         return self.runs_created + self.runs_updated
 
+    def merge(self, other: "MetadataSyncResult") -> "MetadataSyncResult":
+        if int(other.season_year) != int(self.season_year):
+            raise ValueError("Cannot merge metadata sync results from different seasons")
+        for field_name in (
+            "events_created", "events_updated", "entries_created", "entries_existing",
+            "runs_created", "runs_updated", "runs_with_weather", "weather_fallback_events",
+            "events_without_race_lookup",
+        ):
+            setattr(self, field_name, int(getattr(self, field_name)) + int(getattr(other, field_name)))
+        self.warnings.extend(other.warnings)
+        return self
+
 
 def _sync_entry(catalog: LocalCatalog, event_id: str, row: Mapping[str, Any]) -> tuple[str, bool]:
     remote_entry = _remote_id("tm-entry", row)
@@ -198,21 +211,65 @@ def _sync_run(catalog: LocalCatalog, event_id: str, row: Mapping[str, Any]) -> b
     return created
 
 
-def sync_tech_services_season(
-    catalog: LocalCatalog,
-    client: TechServicesHttpClient,
-    season_year: int,
-    *,
-    include_entries: bool = True,
-    include_runs: bool = True,
-) -> MetadataSyncResult:
-    """Mirror one Tech Services season into the local catalog using GETs only."""
+def _event_date(value: Any) -> date | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+
+
+def fetch_tech_services_events(client: TechServicesHttpClient, season_year: int) -> list[Mapping[str, Any]]:
+    """Fetch one season's event metadata using the protected read-only API."""
     year = int(season_year)
-    result = MetadataSyncResult(season_year=year)
     payload = client.tech_master_events(season_year=year, limit=500)
     events = payload.get("events") or []
     if not isinstance(events, list):
         raise ValueError("Tech Services listEvents response did not contain an events array")
+    return [event for event in events if isinstance(event, Mapping)]
+
+
+def prioritize_tech_services_events(
+    events: Sequence[Mapping[str, Any]],
+    *,
+    today: date | None = None,
+) -> list[Mapping[str, Any]]:
+    """Order events for trackside usefulness rather than database chronology.
+
+    The current event is first.  If there is no current event, the most recently
+    completed event is first.  Remaining completed events follow newest-first,
+    then upcoming events nearest-first, then undated records.
+    """
+    now = today or datetime.now().astimezone().date()
+
+    def key(event: Mapping[str, Any]):
+        start = _event_date(event.get("start_date_local"))
+        end = _event_date(event.get("end_date_local")) or start
+        if start is not None and end is not None and start <= now <= end:
+            return (0, -start.toordinal(), str(event.get("name") or ""))
+        if end is not None and end < now:
+            return (1, -end.toordinal(), str(event.get("name") or ""))
+        if start is not None and start > now:
+            return (2, start.toordinal(), str(event.get("name") or ""))
+        return (3, 0, str(event.get("name") or ""))
+
+    return sorted(list(events), key=key)
+
+
+def sync_tech_services_events(
+    catalog: LocalCatalog,
+    client: TechServicesHttpClient,
+    season_year: int,
+    events: Iterable[Mapping[str, Any]],
+    *,
+    include_entries: bool = True,
+    include_runs: bool = True,
+) -> MetadataSyncResult:
+    """Mirror the supplied Tech Services events into the local catalog using GETs only."""
+    year = int(season_year)
+    result = MetadataSyncResult(season_year=year)
 
     for event in events:
         if not isinstance(event, Mapping):
@@ -314,3 +371,21 @@ def sync_tech_services_season(
                 if not runs or len(runs) < page_size or (total and offset >= total):
                     break
     return result
+
+
+def sync_tech_services_season(
+    catalog: LocalCatalog,
+    client: TechServicesHttpClient,
+    season_year: int,
+    *,
+    include_entries: bool = True,
+    include_runs: bool = True,
+) -> MetadataSyncResult:
+    """Mirror one Tech Services season into the local catalog using GETs only."""
+    year = int(season_year)
+    events = prioritize_tech_services_events(fetch_tech_services_events(client, year))
+    return sync_tech_services_events(
+        catalog, client, year, events,
+        include_entries=include_entries,
+        include_runs=include_runs,
+    )

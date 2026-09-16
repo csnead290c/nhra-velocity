@@ -1,5 +1,14 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.8 — staged background sync + account/access UX
+
+- Reworked NHRA Tech Services season synchronization so it no longer blocks the desktop while every event is downloaded. Velocity now prioritizes the current event, or the most recently completed event when between races, refreshes the Run browser as soon as that first event is ready, and continues the rest of the season in a background Qt worker.
+- Added live status-bar progress for background season hydration instead of a long modal wait cursor. The existing manual sync action remains read-only and can still include Tech Master entries plus official timing/canonical weather.
+- On an authenticated first launch with an empty local catalog, Velocity automatically begins the useful-first current/latest-event sync rather than presenting an unexplained empty Run browser.
+- Account actions now reflect actual state: signed-out users see **Sign in**; signed-in users see **Sign out**; the Account item identifies the active Tech Services identity.
+- Source/development builds now enforce NHRA Tech Services authentication by default, matching packaged builds now that the production website auth adapter is bound. Controlled CI/development can still opt out explicitly with `NHRA_TECH_DEV_UNAUTHENTICATED=1`.
+- Added event-priority regression coverage; full automated suite passes at 223 tests.
+
 ## v0.38.0-dev.7 — Windows Tech Services sign-in fix
 
 - Fixed Windows Credential Manager failure (`CredWrite`, WinError 1783) seen after a valid Tech Services login, especially for owner/admin accounts with large capability sets.

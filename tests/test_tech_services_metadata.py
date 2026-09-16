@@ -94,3 +94,30 @@ def test_weather_join_failure_falls_back_to_timing_only_without_writing_server(t
     run=catalog.get_run(str(catalog.list_runs()[0]["id"]))
     assert run["weather"] == {}
     assert run["weather_provenance"] == "unknown"
+
+
+def test_event_priority_prefers_current_then_recent_completed():
+    from datetime import date
+    from runlab.tech_services_metadata import prioritize_tech_services_events
+
+    events = [
+        {"name":"Old","start_date_local":"2026-03-01","end_date_local":"2026-03-03"},
+        {"name":"Recent","start_date_local":"2026-09-01","end_date_local":"2026-09-05"},
+        {"name":"Current","start_date_local":"2026-09-15","end_date_local":"2026-09-18"},
+        {"name":"Next","start_date_local":"2026-09-25","end_date_local":"2026-09-27"},
+    ]
+    ordered = prioritize_tech_services_events(events, today=date(2026,9,16))
+    assert [e["name"] for e in ordered] == ["Current","Recent","Old","Next"]
+
+
+def test_event_priority_uses_most_recent_completed_when_between_events():
+    from datetime import date
+    from runlab.tech_services_metadata import prioritize_tech_services_events
+
+    events = [
+        {"name":"Earlier","start_date_local":"2026-08-01","end_date_local":"2026-08-03"},
+        {"name":"Latest Completed","start_date_local":"2026-09-01","end_date_local":"2026-09-08"},
+        {"name":"Upcoming","start_date_local":"2026-09-20","end_date_local":"2026-09-22"},
+    ]
+    ordered = prioritize_tech_services_events(events, today=date(2026,9,16))
+    assert ordered[0]["name"] == "Latest Completed"
