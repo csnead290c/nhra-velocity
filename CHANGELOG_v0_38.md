@@ -1,5 +1,14 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.21 — Box Corpus Audit + Import Discovery Hardening
+
+- Replaced the desktop's hand-maintained **Open / Attach data log** filters with a filter generated from the same import registry that routes decoders. Supported native extensions can no longer be added to the decoder layer and accidentally omitted from the default file picker; current Box `*.MaxxECU-Zip-log` files are the concrete regression case.
+- Added explicit **support-asset** classification for files that travel with a data set but are not run recordings: RacePak `.rcg`, MoTeC `.ldx`, Holley `.hefi`, FuelTech `.ftm`, MSD Power Grid `.mff`, and BigStuff `.bigTune/.big`. These are excluded from recursive data-log qualification and fail closed with format-specific guidance when selected as a Run log.
+- Corrected `.daq` discovery so the actual NHRA corpus is not mislabeled as AEM-only. The current `Race Data` tree contains 802 `7730_*`/Power Grid `.daq` recordings; they are now recognized as a pending MSD Power Grid / ambiguous DAQ family rather than guessed through a generic parser. Added explicit recognition for Power Grid/ReView `.dqi`.
+- Added a read-only **corpus qualifier + extension inventory** that can scan a local/Box-synced data tree, report recognized and unknown extensions, deterministically sample each format for a quick smoke pass, optionally skip expensive hashing for a full sweep, and flag suspicious successful decodes such as duplicate columns, broken time, mostly-empty numeric channels, or recordings dominated by flat channels.
+- Added `scripts\Audit-NHRA-Velocity-Data.cmd` for a one-click Windows audit. It provides Quick (five files per format) and Full modes and writes qualification + all-extension CSV/JSON reports to a timestamped Desktop folder without modifying source data.
+- Documented the 2026-09-17 read-only Box inventory. The largest currently identified native decoder gaps are MSD Power Grid `.daq` (802 scoped files), FuelTech `.ftml` (21), and Power Grid/ReView `.dqi` (one example elsewhere in Box). Raw proprietary Box bytes could not be batch-tested in-session because the connector's advertised binary-download action currently errors, so the Windows corpus audit is the byte-level completion step.
+
 ## v0.38.0-dev.20 — Compare Workspace + Portable Worksheet Templates
 
 - Added **Compare Workspace Manager…** (`Ctrl+Shift+R`) as one place to assign Main / Reference / Overlay / Available roles, edit display-only time alignment, auto-align comparison Runs to Main, load existing Compare Sets, and save the live setup as a named Compare Set. Validation requires exactly one Main Run and one Reference whenever multiple Runs are displayed.

@@ -20,7 +20,7 @@ from .catalog import LocalCatalog
 from .sync_contract import run_sync_payload, analysis_case_bundle, analysis_case_offline_manifest
 from .official_runs import import_official_run_csv
 from .sync_engine import apply_tech_services_snapshot
-from .qualification import qualify_corpus
+from .qualification import qualify_corpus, extension_inventory
 from .import_registry import registry_rows
 from .case_playback import case_playback_frame, case_time_extent
 from .workstation import channel_catalog, evaluate_gate, MetricDefinition, drag_metric_report, resolve_channel
@@ -91,17 +91,28 @@ def cmd_inspect(args):
 
 
 def cmd_qualify(args):
-    rows=qualify_corpus(args.paths,recursive=args.recursive)
+    rows=qualify_corpus(args.paths,recursive=args.recursive,sample_per_format=args.sample_per_format,compute_sha=not args.skip_hash)
     payload=[r.to_dict() for r in rows]
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(payload,indent=2),encoding='utf-8')
     if args.csv_out:
         import pandas as pd
         pd.DataFrame(payload).to_csv(args.csv_out,index=False)
+    if args.inventory_json or args.inventory_csv:
+        inventory=extension_inventory(args.paths,recursive=args.recursive)
+        if args.inventory_json:
+            Path(args.inventory_json).write_text(json.dumps(inventory,indent=2),encoding='utf-8')
+        if args.inventory_csv:
+            import pandas as pd
+            inv_frame=pd.DataFrame(inventory)
+            if 'examples' in inv_frame.columns:
+                inv_frame['examples']=inv_frame['examples'].map(lambda values:' | '.join(values or []))
+            inv_frame.to_csv(args.inventory_csv,index=False)
     passed=sum(1 for r in rows if r.status=='pass')
     print(f"Qualified {len(rows)} candidate file(s): {passed} pass, {len(rows)-passed} need attention")
     for r in rows:
-        print(f"{r.status:22} {r.vendor:10} {r.filename}  channels={r.numeric_channels}  {r.error[:120]}")
+        detail=r.error[:120] or r.integrity_flags[:120]
+        print(f"{r.status:22} {r.vendor:10} {r.filename}  channels={r.numeric_channels}  {detail}")
     if args.strict and passed != len(rows): raise SystemExit(2)
 
 
@@ -512,6 +523,10 @@ def main():
     s.add_argument("--recursive", action="store_true")
     s.add_argument("--json-out")
     s.add_argument("--csv-out")
+    s.add_argument("--inventory-json", help="Write an all-file extension inventory, including unrecognized families")
+    s.add_argument("--inventory-csv", help="Write an all-file extension inventory, including unrecognized families")
+    s.add_argument("--sample-per-format", type=int, default=0, help="Audit a deterministic spread of N files per recognized format (0 = all)")
+    s.add_argument("--skip-hash", action="store_true", help="Skip full-file SHA-256 reads for faster large-corpus sweeps")
     s.add_argument("--strict", action="store_true", help="Exit non-zero when any candidate fails")
     s.set_defaults(func=cmd_qualify)
 

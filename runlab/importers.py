@@ -920,7 +920,7 @@ def detect_vendor(path: str | Path) -> str:
         return "TunerStudio"
     if spec is not None and spec.key == "excel":
         return "Excel"
-    if spec is not None and spec.status in {"pending", "bridge"}:
+    if spec is not None and spec.status in {"pending", "bridge", "support"}:
         return spec.decoder_key or spec.label
     if _looks_like_maxxecu(path) or "maxxecu" in name:
         return "MaxxECU"
@@ -995,7 +995,7 @@ def load_telemetry(
                 probe_reason = f"filename/extension + content probe ({probe_reason})"
 
     key = selected.strip().lower()
-    if registry_spec is not None and registry_spec.status in {"pending", "bridge"} and key not in {"fueltech"}:
+    if registry_spec is not None and registry_spec.status in {"pending", "bridge", "support"} and key not in {"fueltech"}:
         # Do not allow a recognized proprietary binary to fall through merely
         # because its header happens to contain text strings.
         raise ValueError(pending_message(registry_spec))

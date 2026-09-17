@@ -9,7 +9,7 @@
 | RacePak / downloaded wrapper | `.rpk.bin` and similarly identifiable names | Direct | Content/filename probe routes to the RacePak decoder instead of text parsing. |
 | MoTeC i2 / M1 | `.ld` | Direct | Walks the channel metadata linked list as the authority, preserves native channel timebases and can skip isolated unsupported diagnostic/state encodings without discarding the run. Exercised against a real 2026 PSM M1 log with 180 decodable native channels. |
 | MaxxECU | `.MaxxECU-log`, `.maxxlog` | Direct | Vendor-native format is delimited text. |
-| MaxxECU | supported zip log packages | Direct | Primary log is extracted to a temporary directory. |
+| MaxxECU | `.MaxxECU-Zip-log` / supported zip log packages | Direct | Primary log is extracted to a temporary directory. The desktop picker is registry-derived so this native extension is visible by default. |
 | Racelogic VBOX | `.vbo` | Direct | Parses the documented sectioned, space-delimited VBOX format. Raw clock/GPS columns are preserved; an elapsed logger clock and conventional decimal-degree GPS channels are added. |
 | EFI Analytics / TunerStudio | `.msl`, text `.mlg` | Direct | Opens normal TunerStudio/MegaSquirt delimited logs. Binary `.mlg` remains fail-closed until a binary decoder is qualified. |
 | Excel telemetry table | `.xlsx`, `.xlsm` | Direct interchange | Searches the workbook sheets, applies the same header/unit/channel logic as delimited files, and selects the most telemetry-like sheet. |
@@ -28,7 +28,9 @@ These families are intentionally visible to folder import and the file picker so
 | Holley EFI V6 | `.dl`, `.dlz` | Direct native import. V6 RTC + engine RPM qualified against paired NHRA Pro Stock Holley/RacePak data; unqualified slots remain numeric. V5 sparse/V3 fail closed. |
 | HP Tuners VCM Scanner | `.hpl` | Recognized. Native decoder not yet qualified. |
 | Racelogic VBOX | `.vbb` | Recognized. Newer binary VBOX decoder not yet qualified; text `.vbo` is direct. |
-| AEM | `.daq`, `.itlog` | Recognized. AQ-1 / Infinity native decoders not yet qualified. |
+| MSD Power Grid / ambiguous DAQ binary | `.daq` | Recognized. Current NHRA Box corpus is dominated by `7730_*` Power Grid recordings; native Power Grid/AEM signature-specific decoding is not yet qualified. |
+| MSD Power Grid ReView | `.dqi` | Recognized. Native ReView decoder not yet qualified. |
+| AEM | `.itlog` | Recognized. Infinity native decoder not yet qualified. |
 | ECUMaster EMU Black V3 | `.emublog3` | Recognized. Native decoder not yet qualified. |
 | Emtron EmVision | `.elf`, `.elo` | Recognized. Native ECU/PC and display-log decoders not yet qualified. |
 | Cosworth / Pi | `.pds` | Recognized. Native Pi logged-data decoder/bridge not yet qualified. |
@@ -38,6 +40,19 @@ These families are intentionally visible to folder import and the file picker so
 | CAN/network captures | `.asc`, `.blf`, `.pcap`, `.pcapng` | Recognized. Future bus-log adapter will pair the raw frames with DBC/A2L/other signal definitions. |
 | Legacy spreadsheet | `.xls`, `.ods` | Recognized. Save/export as `.xlsx` or CSV until optional legacy/OpenDocument readers are packaged. |
 | Unknown binary | any | Rejected before the generic text parser. |
+
+## Recognized support/configuration assets
+
+These files can travel with a Run or help interpret it, but they are **not** run recordings and are excluded from recursive data-log qualification.
+
+| Source | Input | Purpose |
+| --- | --- | --- |
+| RacePak | `.rcg` | Logger/channel configuration used to enrich matching DDF data. |
+| MoTeC | `.ldx` | Companion metadata/index sidecar for the corresponding `.ld`. |
+| Holley | `.hefi` | ECU configuration. |
+| FuelTech | `.ftm` | FTManager map/calibration. |
+| MSD Power Grid | `.mff` | Controller configuration/tune. |
+| BigStuff / BigComm | `.bigTune`, `.big` | Calibration/support file; native log family must be qualified separately. |
 
 ## Import architecture rules
 

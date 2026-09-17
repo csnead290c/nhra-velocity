@@ -20,15 +20,20 @@ The production source of permanent Run Assets will be NHRA Tech Services. Corpus
 - row/channel counts;
 - native/canonical channel counts;
 - duration and maximum native rate;
+- generic integrity flags (duplicate channel labels, non-increasing time, mostly-nonfinite channels and constant numeric channels);
 - warnings/errors.
 
 Use:
 
 ```bash
-python -m runlab.cli qualify <files-or-folders> --recursive --json-out qualification.json --csv-out qualification.csv
+python -m runlab.cli qualify <files-or-folders> --recursive \
+  --json-out qualification.json --csv-out qualification.csv \
+  --inventory-json inventory.json --inventory-csv inventory.csv
 ```
 
-A decoder is not considered broadly production-qualified merely because a generated demo passes. Real-file coverage should be expanded as representative server Assets become available through the Tech Services workflow.
+Use `--sample-per-format N` for a deterministic smoke pass spread across each recognized family before running the complete corpus. The inventory output includes *all* extensions, including unrecognized ones, so missing format families cannot disappear from the review simply because they are absent from the registry.
+
+A decoder is not considered broadly production-qualified merely because a generated demo passes. Real-file coverage should be expanded as representative server Assets become available through the Tech Services workflow. The 2026-09-17 read-only Box metadata inventory is documented in `BOX_DATA_FORMAT_AUDIT_2026-09-17.md`.
 
 ## Raw-data rule
 

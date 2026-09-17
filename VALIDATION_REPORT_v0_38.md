@@ -1,10 +1,10 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.18**
+Validated build: **0.38.0-dev.21**
 
 ## Scope
 
-This validation covers the dev.18 branding/setup-readiness/profile-management pass on top of the dev.17 contextual RacePak DDF configuration profiles on top of the dev.16 context-safe Common Channel profile hardening on top of the dev.15 Common Channel / Math Channel Builder foundation on top of the dev.14 packaged-Windows reliability gate and product audit on top of the dev.13.1 startup hardening, dev.13 analysis/statistics consistency work, durable Run-data reopen, ATLAS-style waveform interaction, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
+This validation covers the dev.21 Box corpus-audit/import-discovery hardening on top of the dev.20 Compare Workspace / portable worksheet-template work and the existing v0.38 data-log, Run-workspace, analysis, persistence, packaging, and reliability foundation.
 
 ## Results
 
@@ -130,3 +130,16 @@ The earlier persistence regression only proved that the Run→Asset row and mana
 - Compare Workspace Manager keeps alignment as display-only state and validates one Main plus one Reference for an active multi-Run comparison. Existing Compare Set serialization remains the persistence layer.
 - Grouped Channels shares a plot band only for the same explicit axis-group name and exact display unit; this prevents accidental mixed-unit axes.
 - `python -m compileall -q desktop.py runlab tests` passed.
+
+
+## dev.21 Box corpus / import-discovery validation
+
+- Full automated suite: **294 passed, 1 Qt-only test skipped** in the Linux development environment.
+- `python -m py_compile desktop.py runlab/import_registry.py runlab/importers.py runlab/qualification.py runlab/cli.py` passed.
+- Native RacePak / MoTeC / MaxxECU pipeline self-test: **3/3 passed**. Strict release audit with the pinned RSA/Tech Services reference SHAs: **0 errors / 0 warnings**.
+- Regression coverage proves the default Qt file filter is generated from the import registry and includes `*.MaxxECU-Zip-log`, `.rpk.bin`, and `.ld.bin` without relying on a second hand-maintained extension list.
+- Support/configuration assets (`.rcg`, `.ldx`, `.hefi`, `.ftm`, `.mff`, `.bigTune/.big`) are recognized but excluded from data-log qualification and return explicit format-specific guidance instead of falling through to generic text parsing.
+- `.daq` no longer routes as AEM by extension alone; current NHRA Power Grid recordings remain recognized/fail-closed until a signature-qualified decoder exists. `.dqi` is recognized as the Power Grid/ReView log family.
+- Corpus qualification now records decoder-independent integrity indicators for non-increasing time, duplicate columns, mostly-nonfinite numeric channels, and recordings dominated by constant numeric channels.
+- All-extension inventory output intentionally includes unrecognized suffixes, preventing unsupported families from disappearing merely because they are absent from the registry.
+- The read-only Box metadata survey is documented in `BOX_DATA_FORMAT_AUDIT_2026-09-17.md`. Byte-level validation of proprietary Box files remains a local/Box-synced audit step because the Box connector's advertised raw-download action returned `Tool get_download_url not found` during this validation.

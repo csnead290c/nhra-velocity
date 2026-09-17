@@ -49,6 +49,7 @@ except ImportError as exc:  # pragma: no cover - environment dependent
 from runlab.branding import PRODUCT_NAME, PRODUCT_TAGLINE, PRODUCT_VERSION
 from runlab.product_manifest import WORKBOOK_FORMAT_VERSION
 from runlab.importers import load_telemetry, apply_channel_overrides, auto_map_channels, CANONICAL_CHANNELS, telemetry_file_candidate
+from runlab.import_registry import qt_file_dialog_filter
 from runlab.models import TelemetryRun, Environment, TimingData
 from runlab.telemetry import detect_drag_pass_window, launch_time_override, set_launch_time_override, clear_launch_time_override
 from runlab.audit import audit_run
@@ -6231,7 +6232,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self,
             f"Attach data log — {record.get('driver_name') or ''} {record.get('round') or ''}".strip(),
             '',
-            'Supported data logs (*.ld *.rpk *.ddf *.csv *.tsv *.txt *.log *.maxxlog *.MaxxECU-log *.ftlog *.ftml *.zip *.bin *.vbo *.msl *.mlg *.xlsx *.xlsm *.dl *.dlz *.bigTune *.big);;All files (*.*)'
+            qt_file_dialog_filter()
         )
         files=[str(Path(x)) for x in files if x and Path(x).is_file()]
         if not files:return
@@ -6737,7 +6738,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.statusBar().showMessage(f'Opened {opened} log(s) — {Path(h.path).name} — {len(report.default_channels)} default trace(s) selected',8000)
 
     def open_logs(self):
-        files,_=QtWidgets.QFileDialog.getOpenFileNames(self,'Open data logs','', 'Supported data logs (*.ld *.rpk *.ddf *.csv *.tsv *.txt *.log *.maxxlog *.MaxxECU-log *.ftlog *.ftml *.zip *.bin *.vbo *.msl *.mlg *.xlsx *.xlsm *.dl *.dlz *.bigTune *.big);;MoTeC (*.ld);;RacePak (*.rpk *.ddf *.bin);;MaxxECU (*.maxxlog *.MaxxECU-log *.zip);;FuelTech (*.ftlog *.ftml *.csv *.ld);;Delimited exports (*.csv *.tsv *.txt *.log);;All files (*.*)')
+        files,_=QtWidgets.QFileDialog.getOpenFileNames(self,'Open data logs','', qt_file_dialog_filter())
         self._open_paths(files)
 
     def _open_bundled_demos(self):
