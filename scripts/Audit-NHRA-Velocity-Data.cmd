@@ -51,13 +51,15 @@ if not "%RC%"=="0" (
   exit /b %RC%
 )
 
-echo Building empirical RacePak channel-id dictionary...
-echo This scans every RCG and, in quick mode, a representative spread of RPK files.
-echo Full mode scans every RCG and RPK definition source.
+echo Building RacePak corpus evidence library...
+echo Channel-id history is suggestion-only and will NEVER rename a DDF by itself.
+echo Exact descriptor fingerprints are learned only where a DDF has a matching sibling RCG.
+echo Quick mode scans every RCG plus representative RPKs; Full scans every RCG/RPK.
 echo.
 "%PY%" -m runlab.cli racepak-ids "%TARGET%" --recursive %RACEPAK_ID_ARGS% ^
   --json-out "%OUT%\racepak_channel_ids.json" ^
   --csv-out "%OUT%\racepak_channel_ids.csv" ^
+  --descriptor-csv-out "%OUT%\racepak_descriptor_profiles.csv" ^
   --install
 set "RPK_RC=%ERRORLEVEL%"
 if not "%RPK_RC%"=="0" (
@@ -68,7 +70,9 @@ if not "%RPK_RC%"=="0" (
 
 echo.
 echo Audit complete.
-echo RacePak verified channel ids were installed only as a LOWEST-AUTHORITY source-label fallback.
-echo They do NOT assign Common Channels automatically.
+echo RacePak corpus evidence was installed.
+echo Numeric channel-id history remains suggestion-only and is never auto-applied.
+echo Only an exact known DDF descriptor fingerprint can recover source names/units automatically.
+echo Common Channels are never assigned from corpus evidence.
 start "" "%OUT%"
 pause

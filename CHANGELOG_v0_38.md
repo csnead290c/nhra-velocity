@@ -1,6 +1,18 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.23 — RacePak Evidence Safety / Exact Descriptor Recovery
+
+- Reworked the dev.22 empirical RacePak channel-id feature around a stricter rule: **numeric `_CONNECT4_COMMAND` history is evidence only and never automatically renames an unknown DDF channel**, regardless of how many known configurations agree. This directly avoids over-assuming that a slot/id has one global meaning across cars.
+- Added exact DDF **descriptor-table fingerprint** recovery. VELOCITY may recover source names/units automatically only when the complete raw DDF descriptor SHA-256 exactly matches a previously configured DDF whose recorded ids/rates fully match a sibling RCG. Any conflicting definition observed for that exact fingerprint disables automatic recovery.
+- Configless DDF channels now retain `RacePak Channel <id>` when only id history is available. Historical names/units/config counts/conflicts are preserved as suggestion metadata for engineering review instead of changing the visible source identity.
+- The authority order is now exact per-log config → Vehicle/Category profile → Driver/Category profile → sibling RCG → exact known DDF descriptor fingerprint → id-history suggestion → generic id label. Corpus evidence never assigns Common Channels.
+- Added DDF header-only structure parsing so corpus fingerprint scans can inspect thousands of DDF descriptor tables without loading entire multi-megabyte payloads into memory.
+- The audit now also writes `racepak_descriptor_profiles.csv`. Quick/Full corpus scans install a v2 evidence library and remove the legacy dev.22 v1 default-path library so the superseded ID-only fallback cannot remain active accidentally.
+- Added regressions proving: repeated configs do not inflate evidence; conflicting ids remain conflicts; strong id-only history still leaves a DDF generic; an exact configured descriptor fingerprint can recover source names; changing only the sample-rate descriptor blocks that recovery; and conflicting definitions for the same exact fingerprint fail closed.
+
 ## v0.38.0-dev.22 — Empirical RacePak Channel-ID Library
+
+> **Superseded by dev.23:** dev.22 allowed conflict-free numeric ID history to rename a configless DDF. dev.23 intentionally removes that authority; ID history is suggestion-only.
 
 - Added a conservative **RacePak `_CONNECT4_COMMAND` channel-id census** that mines known `.rcg` and `.rpk` definitions from the user's real data corpus. Evidence is counted by distinct configuration signature so one team with hundreds of repeated runs cannot manufacture false confidence.
 - Added conflict-aware consensus levels: **verified** (3+ distinct configurations, conflict-free), **supported** (2), **single-source**, and **conflict**. Only verified, conflict-free IDs are eligible for automatic fallback naming.

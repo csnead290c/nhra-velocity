@@ -132,24 +132,49 @@ def cmd_racepak_ids(args):
             if col in frame.columns:
                 frame[col] = frame[col].map(lambda values: " | ".join(str(x) for x in (values or [])))
         frame.to_csv(args.csv_out, index=False)
+    if args.descriptor_csv_out:
+        rows = []
+        for profile in payload.get("descriptor_profiles", []) or []:
+            base = {
+                "descriptor_signature_sha256": profile.get("descriptor_signature_sha256", ""),
+                "safe_for_exact_descriptor_recovery": bool(profile.get("safe_for_exact_descriptor_recovery")),
+                "confidence": profile.get("confidence", ""),
+                "recorded_channel_count": profile.get("recorded_channel_count", 0),
+                "distinct_bound_configurations": profile.get("distinct_bound_configurations", 0),
+                "known_ddf_occurrences": profile.get("known_ddf_occurrences", 0),
+                "config_examples": " | ".join(profile.get("config_examples") or []),
+                "ddf_examples": " | ".join(profile.get("ddf_examples") or []),
+            }
+            for channel in profile.get("channels", []) or []:
+                row = dict(base)
+                row.update({
+                    "channel_id": channel.get("channel_id"),
+                    "source_name": channel.get("name", ""),
+                    "unit": channel.get("unit", ""),
+                    "sample_rate_hz": channel.get("sample_rate_hz"),
+                    "distinct_names": " | ".join(channel.get("distinct_names") or []),
+                    "distinct_units": " | ".join(channel.get("distinct_units") or []),
+                })
+                rows.append(row)
+        pd.DataFrame(rows).to_csv(args.descriptor_csv_out, index=False)
     installed = None
     if args.install:
         installed = install_census(payload)
     summary = payload.get("summary", {})
     scan = payload.get("scan", {})
     print(
-        "RacePak channel-id census: "
-        f"{summary.get('channel_ids', 0)} ids; "
-        f"{summary.get('verified_ids', 0)} verified, "
-        f"{summary.get('supported_ids', 0)} supported, "
-        f"{summary.get('conflicted_ids', 0)} conflicted. "
+        "RacePak corpus evidence: "
+        f"{summary.get('channel_ids', 0)} channel ids (ID history is suggestion-only); "
+        f"{summary.get('conflicted_ids', 0)} conflicted ids; "
+        f"{summary.get('safe_exact_descriptor_profiles', 0)} safe exact DDF descriptor fingerprint(s). "
         f"Scanned {scan.get('definition_files_scanned', 0)} definition file(s)."
     )
     if installed:
-        print(f"Installed conservative fallback library: {installed}")
+        print(f"Installed evidence library: {installed}")
+        print("Numeric channel-id history will NOT rename a DDF automatically; only an exact known descriptor fingerprint may recover source names/units.")
     warnings = payload.get("warnings", [])
     if warnings:
-        print(f"Definition-source warnings: {len(warnings)} (see JSON report for details)")
+        print(f"Corpus-evidence warnings: {len(warnings)} (see JSON report for details)")
 
 
 def cmd_selftest(args):
@@ -566,14 +591,15 @@ def main():
     s.add_argument("--strict", action="store_true", help="Exit non-zero when any candidate fails")
     s.set_defaults(func=cmd_qualify)
 
-    s = sp.add_parser("racepak-ids", help="Build an empirical RacePak _CONNECT4_COMMAND channel-id census")
-    s.add_argument("paths", nargs="+", help="Files and/or folders containing RCG/RPK definitions")
+    s = sp.add_parser("racepak-ids", help="Build RacePak channel-id evidence and exact DDF descriptor fingerprints")
+    s.add_argument("paths", nargs="+", help="Files and/or folders containing RacePak DDF/RCG/RPK data")
     s.add_argument("--recursive", action="store_true")
     s.add_argument("--rpk-mode", choices=["none", "quick", "all"], default="quick", help="RCGs are always scanned; quick samples RPK folders, all scans every RPK")
     s.add_argument("--rpk-quick-limit", type=int, default=250, help="Maximum representative RPKs in quick mode")
     s.add_argument("--json-out")
-    s.add_argument("--csv-out")
-    s.add_argument("--install", action="store_true", help="Install verified conflict-free ids as the lowest-authority DDF naming fallback")
+    s.add_argument("--csv-out", help="Write channel-id evidence CSV (suggestion-only)")
+    s.add_argument("--descriptor-csv-out", help="Write exact DDF descriptor fingerprint/channel CSV")
+    s.add_argument("--install", action="store_true", help="Install evidence library; ID history remains suggestion-only")
     s.set_defaults(func=cmd_racepak_ids)
 
     s = sp.add_parser("selftest", help="Run bundled native import/plot pipeline diagnostics")

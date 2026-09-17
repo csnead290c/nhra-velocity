@@ -5005,6 +5005,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 racepak_line='Reusable context profile — '+str(cfg.get('filename') or 'managed config')
             elif run.metadata.get('ddf_config_path'):
                 racepak_line='Active config — '+Path(str(run.metadata.get('ddf_config_path'))).name
+            elif str(run.metadata.get('ddf_definition_authority') or '')=='exact_corpus_descriptor_fingerprint':
+                racepak_line='Exact known DDF descriptor fingerprint — source names recovered from configured corpus match'
+            elif int(run.metadata.get('ddf_channel_id_evidence_count') or 0)>0:
+                racepak_line=(f"Raw DDF channel ids — corpus evidence exists for {int(run.metadata.get('ddf_channel_id_evidence_count') or 0)} "
+                              'channel(s), suggestions only / not auto-applied')
             else:
                 racepak_line='Raw DDF channel ids only — config profile recommended'
         timing_present=any(getattr(run.timing,name,None) not in (None,'') for name in ('sixty_ft_s','three_thirty_ft_s','eighth_mile_s','quarter_mile_s'))

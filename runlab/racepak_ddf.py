@@ -121,31 +121,25 @@ def _config_sample_rate(defn: RpkChannelDef) -> Optional[float]:
     return None
 
 
-def parse_ddf_structure(path_or_bytes: str | Path | bytes | bytearray | memoryview) -> DdfStructure:
-    if isinstance(path_or_bytes, (bytes, bytearray, memoryview)):
-        data = bytes(path_or_bytes)
-        label = "DDF bytes"
-    else:
-        path = Path(path_or_bytes)
-        data = path.read_bytes()
-        label = path.name
-
-    if len(data) < _HEADER_SIZE:
+def _parse_ddf_structure_prefix(prefix: bytes, *, total_size: int, label: str) -> DdfStructure:
+    if len(prefix) < _HEADER_SIZE:
         raise ValueError(f"{label}: file is too small to be a RacePak DDF")
 
-    count = int.from_bytes(data[12:14], "little", signed=False)
+    count = int.from_bytes(prefix[12:14], "little", signed=False)
     if not (1 <= count <= 2048):
         raise ValueError(f"{label}: invalid RacePak DDF descriptor count {count}")
 
     payload_offset = _HEADER_SIZE + count * _DESCRIPTOR_SIZE
-    if payload_offset > len(data):
+    if payload_offset > len(prefix):
         raise ValueError(f"{label}: truncated RacePak DDF descriptor table")
+    if total_size < payload_offset:
+        raise ValueError(f"{label}: file ends before the RacePak DDF payload")
 
     descriptors: list[DdfDescriptor] = []
     seen_ids: set[int] = set()
     for i in range(count):
         start = _HEADER_SIZE + i * _DESCRIPTOR_SIZE
-        rec = data[start : start + _DESCRIPTOR_SIZE]
+        rec = prefix[start : start + _DESCRIPTOR_SIZE]
         if len(rec) != _DESCRIPTOR_SIZE:
             raise ValueError(f"{label}: truncated descriptor {i}")
         if rec[0] != _DESCRIPTOR_MARKER:
@@ -166,15 +160,13 @@ def parse_ddf_structure(path_or_bytes: str | Path | bytes | bytearray | memoryvi
         seen_ids.add(channel_id)
         if not (1 <= rate <= 20_000):
             raise ValueError(f"{label}: implausible sample rate {rate} Hz for channel id {channel_id}")
-        # Qualified descriptor tails are reserved/zero. Treat nonzero bytes as a
-        # new family instead of pretending we understand their meaning.
         if any(rec[14:22]):
             raise ValueError(
                 f"{label}: descriptor {i} contains unsupported nonzero reserved bytes"
             )
         descriptors.append(DdfDescriptor(i, flags, channel_id, rate, config_rate, bytes(rec)))
 
-    payload_nbytes = len(data) - payload_offset
+    payload_nbytes = int(total_size) - payload_offset
     if payload_nbytes < 0 or payload_nbytes % 2:
         raise ValueError(f"{label}: DDF payload is not an even number of int16 bytes")
 
@@ -190,7 +182,7 @@ def parse_ddf_structure(path_or_bytes: str | Path | bytes | bytearray | memoryvi
     signature_bytes = b"".join(d.raw_record for d in descriptors)
     signature = sha256(signature_bytes).hexdigest()
     return DdfStructure(
-        header=bytes(data[:_HEADER_SIZE]),
+        header=bytes(prefix[:_HEADER_SIZE]),
         descriptors=tuple(descriptors),
         payload_offset=payload_offset,
         payload_nbytes=payload_nbytes,
@@ -199,6 +191,30 @@ def parse_ddf_structure(path_or_bytes: str | Path | bytes | bytearray | memoryvi
         partial_frame_words=int(partial),
         descriptor_signature=signature,
     )
+
+
+def parse_ddf_structure(path_or_bytes: str | Path | bytes | bytearray | memoryview) -> DdfStructure:
+    """Parse the DDF header/descriptor table without reading payload bytes when possible.
+
+    Corpus fingerprint scans can therefore inspect thousands of DDFs cheaply;
+    normal decoding still reads the payload later in :func:`parse_racepak_ddf`.
+    """
+    if isinstance(path_or_bytes, (bytes, bytearray, memoryview)):
+        data = bytes(path_or_bytes)
+        return _parse_ddf_structure_prefix(data, total_size=len(data), label="DDF bytes")
+
+    path = Path(path_or_bytes)
+    total_size = path.stat().st_size
+    with path.open("rb") as fh:
+        header = fh.read(_HEADER_SIZE)
+        if len(header) < _HEADER_SIZE:
+            raise ValueError(f"{path.name}: file is too small to be a RacePak DDF")
+        count = int.from_bytes(header[12:14], "little", signed=False)
+        if not (1 <= count <= 2048):
+            raise ValueError(f"{path.name}: invalid RacePak DDF descriptor count {count}")
+        table = fh.read(count * _DESCRIPTOR_SIZE)
+    prefix = header + table
+    return _parse_ddf_structure_prefix(prefix, total_size=total_size, label=path.name)
 
 
 def bind_ddf_config(structure: DdfStructure, config_bytes: bytes) -> DdfConfigBinding:
@@ -331,30 +347,42 @@ def parse_racepak_ddf(
     name_for_id: Dict[int, str] = {}
     used_names: Dict[str, int] = {}
 
-    global_bound = 0
-    global_defs: Dict[int, dict] = {}
+    corpus_exact_profile: dict = {}
+    corpus_exact_defs: Dict[int, dict] = {}
+    channel_id_evidence: Dict[int, dict] = {}
+    corpus_exact_bound = 0
     if binding is None:
-        # Lowest-authority fallback: an empirical, conflict-free RacePak ID
-        # consensus mined from NHRA's own known RCG/RPK corpus. Exact config
-        # bindings and contextual profiles always win. This layer only improves
-        # source labels/units; it never assigns Common Channel roles.
+        # Corpus knowledge has two deliberately different authorities:
+        #   * exact descriptor-table fingerprint -> may recover source names;
+        #   * numeric channel-id history -> evidence/suggestion only, never a
+        #     source-name fallback by itself.
         try:
-            from .racepak_channel_library import lookup_verified_channel
+            from .racepak_channel_library import lookup_channel_evidence, lookup_exact_descriptor_profile
+            corpus_exact_profile = lookup_exact_descriptor_profile(structure.descriptor_signature)
+            if corpus_exact_profile:
+                for row in corpus_exact_profile.get("channels", []) or []:
+                    try:
+                        corpus_exact_defs[int(row.get("channel_id"))] = dict(row)
+                    except Exception:
+                        continue
             for desc in structure.recorded_descriptors:
-                rec = lookup_verified_channel(desc.channel_id)
+                rec = lookup_channel_evidence(desc.channel_id)
                 if rec:
-                    global_defs[desc.channel_id] = rec
+                    channel_id_evidence[desc.channel_id] = rec
         except Exception:
-            global_defs = {}
+            corpus_exact_profile = {}
+            corpus_exact_defs = {}
+            channel_id_evidence = {}
 
     for desc in structure.recorded_descriptors:
         defn = binding.by_channel_id.get(desc.channel_id) if binding else None
-        global_def = global_defs.get(desc.channel_id) if not defn else None
+        exact_def = corpus_exact_defs.get(desc.channel_id) if not defn else None
+        id_evidence = channel_id_evidence.get(desc.channel_id) if not defn else None
         if defn and defn.name.strip():
             base_name = defn.name.strip()
-        elif global_def and str(global_def.get("consensus_name") or "").strip():
-            base_name = str(global_def.get("consensus_name")).strip()
-            global_bound += 1
+        elif exact_def and str(exact_def.get("name") or "").strip():
+            base_name = str(exact_def.get("name")).strip()
+            corpus_exact_bound += 1
         else:
             base_name = f"RacePak Channel {desc.channel_id}"
         if base_name in used_names:
@@ -366,9 +394,12 @@ def parse_racepak_ddf(
         name_for_id[desc.channel_id] = name
         if defn and defn.unit:
             unit = normalize_unit(defn.unit)
-        elif global_def and global_def.get("consensus_unit"):
-            unit = normalize_unit(str(global_def.get("consensus_unit"))) or str(global_def.get("consensus_unit"))
+        elif exact_def and exact_def.get("unit"):
+            raw_unit = str(exact_def.get("unit") or "")
+            unit = normalize_unit(raw_unit) or raw_unit
         else:
+            # A unit learned only from numeric channel-id history is evidence,
+            # not authority. Keep the displayed engineering unit unknown.
             unit = ""
         values = decoded[desc.channel_id]
         t = np.arange(len(values), dtype=float) / float(desc.sample_rate_hz)
@@ -378,11 +409,24 @@ def parse_racepak_ddf(
             "ddf_decimal_exponent": desc.decimal_exponent,
             "ddf_config_rate": desc.config_rate,
         }
-        if global_def:
+        if exact_def:
             series_metadata.update({
-                "racepak_definition_source": "global_corpus_consensus",
-                "racepak_definition_confidence": str(global_def.get("confidence") or ""),
-                "racepak_definition_distinct_configurations": int(global_def.get("distinct_configurations") or 0),
+                "racepak_definition_source": "exact_corpus_descriptor_fingerprint",
+                "racepak_descriptor_signature_sha256": structure.descriptor_signature,
+                "racepak_definition_distinct_configurations": int(corpus_exact_profile.get("distinct_bound_configurations") or 0),
+            })
+        elif id_evidence:
+            # Retain useful corpus history where the engineer can inspect it,
+            # but do not change the source name or unit from ID evidence alone.
+            series_metadata.update({
+                "racepak_definition_source": "channel_id_evidence_only",
+                "racepak_id_evidence_level": str(id_evidence.get("evidence_level") or ""),
+                "racepak_id_evidence_suggested_name": str(id_evidence.get("suggested_name") or ""),
+                "racepak_id_evidence_suggested_unit": str(id_evidence.get("suggested_unit") or ""),
+                "racepak_id_evidence_distinct_configurations": int(id_evidence.get("distinct_configurations") or 0),
+                "racepak_id_evidence_distinct_names": list(id_evidence.get("distinct_names") or []),
+                "racepak_id_evidence_distinct_units": list(id_evidence.get("distinct_units") or []),
+                "racepak_id_evidence_automatic_naming_allowed": False,
             })
         native_channels[name] = ChannelSeries(
             name=name,
@@ -439,21 +483,40 @@ def parse_racepak_ddf(
         "ddf_config_path": str(selected_config.resolve()) if selected_config else None,
         "ddf_config_sha256": sha256(selected_config.read_bytes()).hexdigest() if selected_config else None,
         "ddf_config_bound_channels": len(binding.by_channel_id) if binding else 0,
-        "ddf_global_definition_bound_channels": int(global_bound),
-        "ddf_unmatched_channel_ids": list(binding.unmatched_ddf_ids) if binding else [d.channel_id for d in structure.recorded_descriptors if d.channel_id not in global_defs],
+        # Retained as a zero-valued compatibility field: dev.23 intentionally
+        # disables the dev.22 numeric-ID automatic naming behavior.
+        "ddf_global_definition_bound_channels": 0,
+        "ddf_corpus_exact_descriptor_bound_channels": int(corpus_exact_bound),
+        "ddf_channel_id_evidence_count": int(len(channel_id_evidence)),
+        "ddf_definition_authority": (
+            "exact_config" if binding else
+            "exact_corpus_descriptor_fingerprint" if corpus_exact_bound else
+            "channel_id_evidence_only" if channel_id_evidence else
+            "raw_channel_ids"
+        ),
+        "ddf_unmatched_channel_ids": list(binding.unmatched_ddf_ids) if binding else [
+            d.channel_id for d in structure.recorded_descriptors if d.channel_id not in corpus_exact_defs
+        ],
         "original_channel_map": dict(channel_map),
     }
     if not binding:
-        if global_bound:
+        if corpus_exact_bound:
             metadata["data_warnings"] = [
-                f"Raw RacePak DDF samples were decoded without an exact RCG/RPK configuration. {global_bound} recorded channel(s) "
-                "were labeled from VELOCITY's conflict-free NHRA RacePak channel-id consensus library. Remaining channels retain "
-                "stable RacePak channel-id labels. No Common Channel engineering roles were assigned automatically."
+                f"Raw RacePak DDF samples were decoded without an attached RCG/RPK configuration. The complete DDF descriptor-table "
+                f"fingerprint exactly matches a previously configured DDF in the NHRA corpus, so {corpus_exact_bound} recorded channel(s) "
+                "recovered source names/units from that exact descriptor fingerprint. Numeric channel-id frequency alone was not used. "
+                "No Common Channel engineering roles were assigned automatically."
+            ]
+        elif channel_id_evidence:
+            metadata["data_warnings"] = [
+                f"Raw RacePak DDF samples were decoded without a matching RCG/RPK configuration. {len(channel_id_evidence)} recorded "
+                "channel id(s) have historical corpus evidence, but VELOCITY left their source names/units generic because channel-id "
+                "history is suggestion-only and never automatic. Review the evidence or supply a matching configuration."
             ]
         else:
             metadata["data_warnings"] = [
                 "Raw RacePak DDF samples were decoded directly, but no matching RCG/RPK configuration was supplied. "
-                "Channels are identified by stable RacePak channel id; NHRA Velocity did not guess channel names or canonical roles."
+                "Channels are identified by stable RacePak channel id; NHRA Velocity did not guess channel names, units, or Common Channel roles."
             ]
     elif binding.unmatched_ddf_ids:
         metadata["data_warnings"] = [

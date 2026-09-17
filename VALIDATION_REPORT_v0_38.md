@@ -1,15 +1,29 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.22**
+Validated build: **0.38.0-dev.23**
 
 ## Scope
 
-This validation covers the dev.22 empirical RacePak channel-id library on top of the dev.21 Box corpus-audit/import-discovery hardening, dev.20 Compare Workspace / portable worksheet-template work, and the existing v0.38 data-log, Run-workspace, analysis, persistence, packaging, and reliability foundation.
+This validation covers the dev.23 RacePak corpus-evidence safety redesign on top of the dev.22 mining foundation, dev.21 Box corpus-audit/import-discovery hardening, dev.20 Compare Workspace / portable worksheet-template work, and the existing v0.38 data-log, Run-workspace, analysis, persistence, packaging, and reliability foundation.
 
 ## Results
 
 
+## dev.23 RacePak evidence-safety validation
+
+- Complete source suite: **300 passed, 1 skipped** across two batches in the Linux packaging environment.
+- RacePak / MoTeC / MaxxECU native self-tests: **3/3 passed**.
+- Strict release-consistency audit: **0 errors / 0 warnings** with the pinned upstream SHAs supplied.
+- Numeric RacePak channel-id history is now regression-locked as **suggestion only**. Even three or more consistent semantic configurations cannot rename an unknown DDF channel by id alone.
+- Exact automatic source-name recovery is limited to a complete DDF descriptor-table SHA-256 that was learned from a real DDF fully matched to a sibling RCG. Changing only a descriptor sample rate changes the fingerprint and blocks recovery.
+- Conflicting source definitions observed for the same exact descriptor fingerprint fail closed and leave the DDF generic.
+- Corpus-derived source identity still leaves the Common Channel map time-only until the engineer explicitly maps engineering roles.
+- DDF structure-only parsing now reads only the header/descriptor table from file paths, allowing large corpus fingerprint scans without loading full payloads.
+- The current Linux packaging environment does not contain PySide6, so the real desktop `--smoke-test` cannot run here; the Windows updater and Windows/macOS CI packaging lanes remain the authoritative Qt smoke gates.
+
 ## dev.22 empirical RacePak channel-id validation
+
+> **Superseded by dev.23:** dev.22 allowed conflict-free numeric ID history to rename a configless DDF. dev.23 intentionally removes that authority; ID history is suggestion-only.
 
 - Full automated suite: **297 passed, 1 skipped** in the Linux packaging environment.
 - Added regression coverage proving repeated race files from one identical RacePak configuration count as one semantic vote rather than manufacturing consensus confidence.

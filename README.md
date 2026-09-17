@@ -1,6 +1,11 @@
-# NHRA Velocity — Development v0.38 (dev.18)
+# NHRA Velocity — Development v0.38 (dev.23)
 
 NHRA Velocity is a native desktop engineering workstation for NHRA telemetry, vehicle-performance analysis, synchronized evidence, and future incident reconstruction.
+
+
+## dev.23 RacePak corpus-evidence safety
+
+The RacePak corpus miner now treats numeric `_CONNECT4_COMMAND` history as **suggestion-only evidence**, never as a global source-name rule. Configless DDFs remain `RacePak Channel <id>` unless VELOCITY has stronger authority: an exact config/profile/sibling RCG or an **exact known DDF descriptor-table fingerprint** that was previously bound to a matching RCG. Any conflict on that exact fingerprint disables recovery. Corpus evidence never assigns Common Channels. See `RACEPAK_CHANNEL_ID_LIBRARY.md`.
 
 
 ## dev.18 setup / branding consolidation
