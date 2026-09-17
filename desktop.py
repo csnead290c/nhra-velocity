@@ -96,6 +96,17 @@ from runlab.case_timeline import CaseTimeAnchor, fit_case_run_alignment, store_c
 from runlab.case_playback import CasePlaybackController, case_playback_frame, sample_telemetry_at_asset_time
 from runlab.workstation import channel_catalog, set_channel_alias, gates, GateDefinition, save_gate, evaluate_gate, MetricDefinition, drag_metric_report
 from runlab.common_channels import common_channel_specs, common_channel_label
+from runlab.racepak_config_profiles import (
+    matching_profile as matching_racepak_config_profile,
+    profile_scope_options as racepak_config_profile_scope_options,
+    save_profile as save_racepak_config_profile,
+    delete_profile as delete_racepak_config_profile,
+    config_path_from_profile as racepak_config_path_from_profile,
+    exact_binding_from_settings as racepak_exact_config_binding,
+    exact_binding_record as racepak_exact_config_record,
+    resolve_config_path as resolve_racepak_config_path,
+)
+from runlab.racepak_ddf import parse_ddf_structure, bind_ddf_config
 from runlab.heatmap import binned_map
 from runlab.display_analysis import paired_channel_data, linear_regression, channel_distribution, sample_channel_at
 from runlab.definition_library import (
@@ -4033,6 +4044,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.a_saved_trend=QtGui.QAction('Saved KPI Trend Display',self); self.a_saved_trend.triggered.connect(lambda:self.current_sheet().add_saved_trend())
         self.a_strip_model=QtGui.QAction('NHRA Strip / Model Residuals',self); self.a_strip_model.triggered.connect(lambda:self.current_sheet().add_strip_model())
         self.a_common_channels=QtGui.QAction('Common Channel Mapping…',self); self.a_common_channels.setShortcut('Ctrl+Alt+M'); self.a_common_channels.triggered.connect(self._common_channel_mapping_dialog)
+        self.a_racepak_config=QtGui.QAction('RacePak DDF Configuration…',self); self.a_racepak_config.triggered.connect(self._racepak_config_dialog)
         self.a_math=QtGui.QAction('Math Channel Builder…',self); self.a_math.setShortcut('Ctrl+M'); self.a_math.triggered.connect(self._new_math_channel)
         self.a_reconstruct=QtGui.QAction('Reconstruct Delivered Power…',self); self.a_reconstruct.triggered.connect(self._reconstruct_power)
         self.a_infer=QtGui.QAction('Inference Center…',self); self.a_infer.setShortcut('Ctrl+I'); self.a_infer.triggered.connect(self._inference_center)
@@ -4171,7 +4183,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for preset in QUICK_GRAPH_PRESETS:
             qg.addAction(preset, lambda checked=False, name=preset: self._apply_quick_graph(name))
         add=m.addMenu('Add Display'); add.addAction(self.a_wave); add.addAction(self.a_values); add.addAction(self.a_gauge); add.addAction(self.a_region_stats); add.addAction(self.a_scatter); add.addAction(self.a_hist); add.addAction(self.a_spectrum); add.addAction(self.a_load_map); add.addAction(self.a_metric_report); add.addAction(self.a_saved_report); add.addAction(self.a_saved_trend); add.addAction(self.a_strip_model); add.addAction(self.a_envelope); add.addAction(self.a_delta); add.addAction(self.a_comparison_summary); add.addAction(self.a_events); add.addAction(self.a_alarm_status); add.addAction(self.a_notepad); add.addAction(self.a_audit); add.addAction(self.a_sensor_health); add.addAction(self.a_knowledge)
-        m=self.menuBar().addMenu('&Data'); m.addAction('Run Details / Setup…',lambda:self.metadata.setFocus()); m.addAction(self.a_common_channels); m.addAction(self.a_math); m.addAction(self.a_gate); libm=m.addMenu('Analysis Definition Library'); [libm.addAction(a) for a in (self.a_library_import,self.a_library_export,self.a_library_capture,self.a_library_constant,self.a_library_metric,self.a_library_segment,self.a_library_condition,self.a_library_event_rule,self.a_library_report)]; m.addSeparator(); m.addAction(self.a_site_sync); m.addAction(self.a_attach_selected_run); m.addAction(self.a_keep_offline); m.addAction(self.a_capture_snapshot); m.addAction(self.a_history); m.addSeparator(); m.addAction(self.a_apply_sync)
+        m=self.menuBar().addMenu('&Data'); m.addAction('Run Details / Setup…',lambda:self.metadata.setFocus()); m.addAction(self.a_common_channels); m.addAction(self.a_racepak_config); m.addAction(self.a_math); m.addAction(self.a_gate); libm=m.addMenu('Analysis Definition Library'); [libm.addAction(a) for a in (self.a_library_import,self.a_library_export,self.a_library_capture,self.a_library_constant,self.a_library_metric,self.a_library_segment,self.a_library_condition,self.a_library_event_rule,self.a_library_report)]; m.addSeparator(); m.addAction(self.a_site_sync); m.addAction(self.a_attach_selected_run); m.addAction(self.a_keep_offline); m.addAction(self.a_capture_snapshot); m.addAction(self.a_history); m.addSeparator(); m.addAction(self.a_apply_sync)
         m.addAction('Data Integrity Audit…',self._show_audit); m.addAction(self.a_sensor_health)
         m=self.menuBar().addMenu('&Analysis')
         quick=m.addMenu('Quick Analysis')
@@ -4213,7 +4225,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ('Add Scatter',lambda:self.current_sheet().add_scatter()),('Add Histogram',lambda:self.current_sheet().add_histogram()),
             ('Add FFT / PSD Spectrum',lambda:self.current_sheet().add_spectrum()),('Add Load / Heat Map',lambda:self.current_sheet().add_load_map()),('Add Segment / KPI Report',lambda:self.current_sheet().add_metric_report()),('Add NHRA Strip / Model Residuals',lambda:self.current_sheet().add_strip_model()),('Add Multi-Run Envelope',lambda:self.current_sheet().add_envelope()),
             ('Add Reference Delta',lambda:self.current_sheet().add_delta()),('Add Run Comparison Summary',lambda:self.current_sheet().add_comparison_summary()),('Add Alarm Status',lambda:self.current_sheet().add_alarm_status()),('Add Cursor Region Statistics',lambda:self.current_sheet().add_region_stats()),('Add Sensor Health',lambda:self.current_sheet().add_sensor_health()),
-            ('Pro Stock Shift Report…',self._pro_stock_shift_report),('Common Channel Mapping…',self._common_channel_mapping_dialog),('Math Channel Builder…',self._new_math_channel),('Data Gate…',self._new_data_gate),('Reconstruct Delivered Power…',self._reconstruct_power),
+            ('Pro Stock Shift Report…',self._pro_stock_shift_report),('Common Channel Mapping…',self._common_channel_mapping_dialog),('RacePak DDF Configuration…',self._racepak_config_dialog),('Math Channel Builder…',self._new_math_channel),('Data Gate…',self._new_data_gate),('Reconstruct Delivered Power…',self._reconstruct_power),
             ('Inference Center…',self._inference_center),('Create Compare Run…',self._create_compare_run),('Save Current Compare Set…',self._save_current_compare_set),('Apply Named Compare Set…',self._apply_named_compare_set),('Next Reference Run',lambda:self._step_compare_reference(1)),('Previous Reference Run',lambda:self._step_compare_reference(-1)),('Simulation Study Center…',self._simulation_study_center),('Capture Vehicle Model Snapshot…',self._capture_model_snapshot),('Engineering History…',self._engineering_history),('Sync NHRA Tech Services Data…',self._sync_tech_services_data),('Attach Data Log to Selected Run…',self._attach_local_telemetry_to_selected_run),('Keep Active Asset Offline',self._keep_active_offline),
             ('Run Import / Plot Data Self-Test…',self._run_data_selftest),('Open Diagnostic Log Folder',self._open_log_folder),
         ]
@@ -4685,6 +4697,205 @@ class MainWindow(QtWidgets.QMainWindow):
                 'unit_overrides':dict(handle.unit_overrides),
             },
         )
+
+    @staticmethod
+    def _racepak_is_ddf_handle(handle):
+        if handle is None:
+            return False
+        return str(handle.run.metadata.get('source_format') or '').lower().startswith('racepak raw ddf') or Path(str(handle.path or '')).suffix.lower()=='.ddf'
+
+    @staticmethod
+    def _racepak_translate_overrides_by_channel_id(old_run, new_run, overrides):
+        """Translate exact Common Channel overrides across a config rename.
+
+        This is intentionally not semantic guessing.  It only follows the exact
+        RacePak _CONNECT4_COMMAND/channel id already embedded in both decoded
+        channel objects.  If an id is not present on both sides, the override is
+        left unchanged and normal validation can reject it.
+        """
+        old_id={}
+        for name,ch in getattr(old_run,'native_channels',{}).items():
+            cid=getattr(ch,'metadata',{}).get('racepak_connect4_command') if getattr(ch,'metadata',None) else None
+            if cid is not None: old_id[str(name)]=int(cid)
+        new_name={}
+        for name,ch in getattr(new_run,'native_channels',{}).items():
+            cid=getattr(ch,'metadata',{}).get('racepak_connect4_command') if getattr(ch,'metadata',None) else None
+            if cid is not None: new_name[int(cid)]=str(name)
+        out={}
+        for role,source in dict(overrides or {}).items():
+            source=str(source or '')
+            if not source:
+                out[role]='';continue
+            if source in new_run.data.columns:
+                out[role]=source;continue
+            cid=old_id.get(source)
+            out[role]=new_name.get(cid,source) if cid is not None else source
+        return out
+
+    def _racepak_config_context(self):
+        h=self.store.active
+        if self._racepak_is_ddf_handle(h):
+            record=self.catalog.get_run(str(h.catalog_run_id)) if str(h.catalog_run_id or '') else None
+            return h,record
+        rid=self.run_browser.selected_run_id() if hasattr(self,'run_browser') else ''
+        record=self.catalog.get_run(rid) if rid else None
+        return None,record
+
+    def _reload_racepak_ddf_handle(self, handle, config_path: str):
+        old_run=handle.run
+        run=load_telemetry(handle.path,racepak_config_path=config_path)
+        if handle.catalog_run_id:
+            apply_catalog_run_authority(self.catalog,str(handle.catalog_run_id),run)
+        profile_overrides=learned_common_channel_overrides(run)
+        exact=self._racepak_translate_overrides_by_channel_id(old_run,run,handle.channel_overrides)
+        # Profile defaults are below exact-data-log authority.
+        combined={**profile_overrides,**exact}
+        invalid=[]
+        for role,source in list(combined.items()):
+            if source and source not in run.data.columns:
+                invalid.append(f'{role} → {source}')
+                combined.pop(role,None)
+        if combined or handle.unit_overrides:
+            run=apply_channel_overrides(run,combined,handle.unit_overrides)
+        handle.run=run
+        handle.channel_overrides=combined
+        self._persist_exact_channel_settings(handle)
+        if handle.catalog_asset_id:
+            run.metadata['catalog_asset_id']=handle.catalog_asset_id
+            run.metadata['catalog_telemetry_session_id']=handle.catalog_session_id
+            self._restore_catalog_launch_zero(handle)
+        self.store.changed.emit();self.store.activeChanged.emit(handle)
+        if invalid:
+            QtWidgets.QMessageBox.information(
+                self,'RacePak DDF Configuration',
+                'The config was applied, but these old Common Channel mappings could not be carried forward because the exact RacePak channel id was not present in the new config:\n\n'+'\n'.join(invalid)+
+                '\n\nReview Data → Common Channel Mapping before using portable analysis.'
+            )
+
+    def _racepak_config_dialog(self):
+        handle,record=self._racepak_config_context()
+        if handle is None and record is None:
+            QtWidgets.QMessageBox.information(
+                self,'RacePak DDF Configuration',
+                'Open a RacePak DDF or select an authoritative Tech Services Run first.'
+            );return
+        if handle is not None and not self._racepak_is_ddf_handle(handle):
+            QtWidgets.QMessageBox.information(self,'RacePak DDF Configuration','The active data log is not a RacePak DDF.');return
+
+        settings={}
+        exact={}
+        if handle is not None and handle.catalog_asset_id:
+            session=self.catalog.get_telemetry_session(str(handle.catalog_asset_id)) or {}
+            settings=session.get('settings') or {}
+            exact=racepak_exact_config_binding(settings)
+        context_obj=record if record is not None else handle.run
+        profile=matching_racepak_config_profile(context_obj)
+        profile_path=racepak_config_path_from_profile(profile) if profile else ''
+        exact_cfg=exact.get('config') if isinstance(exact.get('config'),dict) else exact
+        exact_path=str(exact_cfg.get('managed_path') or '') if isinstance(exact_cfg,dict) else ''
+        active_path=str(handle.run.metadata.get('ddf_config_path') or '') if handle is not None else ''
+        initial=exact_path or profile_path or active_path
+
+        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle('RacePak DDF Configuration');dlg.resize(800,430)
+        lay=QtWidgets.QVBoxLayout(dlg)
+        if record is not None:
+            identity=' · '.join(x for x in (str(record.get('driver_name') or ''),str(record.get('category') or ''),str(record.get('car_number') or '')) if x)
+            lay.addWidget(QtWidgets.QLabel(f'<b>Context:</b> {html.escape(identity or "Selected Tech Services Run")}'))
+        intro=QtWidgets.QLabel(
+            'A RacePak DDF contains the samples and stable channel IDs. The matching RCG/RPK configuration supplies channel names and units. '
+            'Velocity never treats a RacePak config as vendor-global. An exact data-log binding wins; otherwise an explicitly saved Driver/Category or Vehicle/Category profile is used.'
+        );intro.setWordWrap(True);lay.addWidget(intro)
+        form=QtWidgets.QFormLayout();lay.addLayout(form)
+        current_exact='None'
+        if exact_path: current_exact=f"{Path(exact_path).name}  [{str(exact_cfg.get('sha256') or '')[:10]}]"
+        current_profile='None'
+        if profile_path:
+            cfg=profile.get('config',{}) if isinstance(profile,dict) else {}
+            current_profile=f"{cfg.get('filename') or Path(profile_path).name} — {str(profile.get('scope') or '').replace('_',' + ')}"
+        form.addRow('Exact data-log config',QtWidgets.QLabel(current_exact))
+        form.addRow('Matching reusable profile',QtWidgets.QLabel(current_profile))
+        file_row=QtWidgets.QHBoxLayout();path_edit=QtWidgets.QLineEdit(initial);browse=QtWidgets.QPushButton('Browse…');file_row.addWidget(path_edit,1);file_row.addWidget(browse);form.addRow('Configuration file',file_row)
+        scope=QtWidgets.QComboBox()
+        if handle is not None and handle.catalog_asset_id:
+            scope.addItem('This data log only — pin exact configuration','exact')
+        for key,label in racepak_config_profile_scope_options(context_obj):scope.addItem(label,key)
+        if scope.count()==0:
+            scope.addItem('This data log only','exact')
+        form.addRow('Save / apply as',scope)
+        status=QtWidgets.QLabel('Choose an .rcg file or a prior .rpk containing the same DataLink channel definitions.');status.setWordWrap(True);form.addRow('Validation',status)
+
+        def choose_file():
+            start=path_edit.text().strip() or ''
+            chosen,_=QtWidgets.QFileDialog.getOpenFileName(dlg,'Choose RacePak DDF configuration',start,'RacePak configuration (*.rcg *.RCG *.rpk *.RPK);;All files (*.*)')
+            if chosen:path_edit.setText(chosen);validate_file()
+        browse.clicked.connect(choose_file)
+
+        def validate_file():
+            config=Path(path_edit.text().strip())
+            if not config.is_file():status.setText('Configuration file not found.');return False
+            try:
+                # Profile save performs general RacePak config validation.  When
+                # a DDF is active, additionally prove the channel ids/sample-rate
+                # signature match this exact recording before allowing Apply.
+                if handle is not None:
+                    structure=parse_ddf_structure(handle.path)
+                    binding=bind_ddf_config(structure,config.read_bytes())
+                    if binding.duplicate_config_ids:
+                        raise ValueError('Duplicate _CONNECT4_COMMAND ids: '+', '.join(map(str,binding.duplicate_config_ids[:12])))
+                    if binding.rate_mismatches:
+                        raise ValueError('Sample-rate mismatch: '+'; '.join(binding.rate_mismatches[:8]))
+                    matched=len(structure.recorded_descriptors)-len(binding.unmatched_ddf_ids)
+                    status.setText(f'Valid for this DDF: {matched}/{len(structure.recorded_descriptors)} recorded channel IDs matched; {len(binding.unmatched_ddf_ids)} unmatched.')
+                else:
+                    # Do not save yet, but inspect through the same strict parser
+                    # by creating a managed record only on Apply.
+                    from runlab.racepak_config_profiles import inspect_racepak_config
+                    cfg=inspect_racepak_config(config)
+                    status.setText(f'Valid RacePak configuration: {cfg.connect4_definition_count} DDF-identifiable channels.')
+                return True
+            except Exception as exc:
+                status.setText(f'Not valid: {exc}');return False
+        path_edit.editingFinished.connect(validate_file)
+
+        buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel)
+        buttons.button(QtWidgets.QDialogButtonBox.Ok).setText('Apply')
+        buttons.accepted.connect(dlg.accept);buttons.rejected.connect(dlg.reject);lay.addWidget(buttons)
+        if initial:validate_file()
+        if dlg.exec()!=QtWidgets.QDialog.Accepted:return
+        config=Path(path_edit.text().strip())
+        if not validate_file():
+            QtWidgets.QMessageBox.warning(self,'RacePak DDF Configuration','The selected configuration did not validate. Nothing was changed.');return
+        try:
+            scope_key=str(scope.currentData() or '')
+            managed_path=''
+            source='explicit_exact'
+            if scope_key in {'driver_category','vehicle_category'}:
+                saved=save_racepak_config_profile(context_obj,config,scope=scope_key)
+                managed_path=racepak_config_path_from_profile(saved)
+                source='context_profile'
+            else:
+                rec=racepak_exact_config_record(config,source='explicit_exact')
+                cfg=rec.get('config',{})
+                managed_path=str(cfg.get('managed_path') or '')
+            if not managed_path:
+                raise ValueError('Velocity could not preserve a managed copy of the configuration.')
+            # If an exact DDF is in front of us, pin the actual config used even
+            # when it also came from a reusable context profile. Historical logs
+            # must not silently change when that profile is edited later.
+            if handle is not None and handle.catalog_asset_id:
+                pin_source=saved.get('config') if scope_key in {'driver_category','vehicle_category'} and isinstance(saved,dict) else managed_path
+                pin=racepak_exact_config_record(pin_source,source=source)
+                self.catalog.update_telemetry_session_settings(str(handle.catalog_asset_id),{'racepak_ddf_config':pin})
+                self._reload_racepak_ddf_handle(handle,managed_path)
+            msg='RacePak DDF configuration applied.'
+            if scope_key in {'driver_category','vehicle_category'}:
+                msg+=f' Future matching DDFs will use this {scope.currentText()} profile and each attached log will be pinned to the exact config it used.'
+            else:
+                msg+=' This configuration is pinned only to the current data log.'
+            self.statusBar().showMessage(msg,9000)
+        except Exception as exc:
+            logging.exception('RacePak DDF configuration failed')
+            QtWidgets.QMessageBox.critical(self,'RacePak DDF Configuration',str(exc))
 
     def _assign_common_channel(self, channel):
         h=self.store.active
@@ -5659,10 +5870,22 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             for path in files:
                 try:
-                    run=load_telemetry(path)
+                    racepak_cfg_path=''
+                    racepak_cfg_source=''
+                    profile={}
+                    if Path(path).suffix.lower()=='.ddf':
+                        profile=matching_racepak_config_profile(record)
+                        racepak_cfg_path=racepak_config_path_from_profile(profile) if profile else ''
+                        if racepak_cfg_path:
+                            racepak_cfg_source='context_profile'
+                    run=load_telemetry(path, racepak_config_path=racepak_cfg_path or None)
                     _rid,asset_id,session_id=register_opened_telemetry(
                         self.catalog,path,run,run_id=run_id,managed=True,local_attachment=True
                     )
+                    if str(run.metadata.get('source_format') or '').lower().startswith('racepak raw ddf') and run.metadata.get('ddf_config_path'):
+                        cfg_record=profile.get('config') if racepak_cfg_source=='context_profile' and isinstance(profile,dict) else str(run.metadata['ddf_config_path'])
+                        binding=racepak_exact_config_record(cfg_record, source=racepak_cfg_source or 'sibling_discovery')
+                        self.catalog.update_telemetry_session_settings(asset_id,{'racepak_ddf_config':binding})
                     asset=self.catalog.get_asset(asset_id) or {}
                     stored_path=self.catalog.local_asset_read_path(asset_id) or str(asset.get('local_path') or path)
                     already=next((h for h in self.store.runs if str(h.catalog_asset_id or '')==str(asset_id)),None)
@@ -5797,8 +6020,19 @@ class MainWindow(QtWidgets.QMainWindow):
                         path=self.catalog.local_asset_read_path(str(asset['id']))
                     if not path or not Path(path).is_file():
                         raise FileNotFoundError(asset.get('filename') or asset.get('id'))
-                    run=load_telemetry(path)
+                    existing_session=self.catalog.get_telemetry_session(str(asset['id'])) or {}
+                    existing_settings=existing_session.get('settings') or {}
+                    racepak_cfg_path=''
+                    racepak_cfg_source=''
+                    _cfg_rec={}
+                    if Path(str(asset.get('filename') or path)).suffix.lower()=='.ddf':
+                        racepak_cfg_path,racepak_cfg_source,_cfg_rec=resolve_racepak_config_path(record,session_settings=existing_settings)
+                    run=load_telemetry(path, racepak_config_path=racepak_cfg_path or None)
                     session_id=self.catalog.ensure_telemetry_session(str(asset['id']),display_name=str(asset.get('filename') or Path(path).stem),vendor=run.vendor,channel_summary={'channels':len(run.data.columns),'canonical_roles':sorted(run.channel_map.keys())})
+                    if str(run.metadata.get('source_format') or '').lower().startswith('racepak raw ddf') and run.metadata.get('ddf_config_path') and not racepak_exact_config_binding(existing_settings):
+                        cfg_record=_cfg_rec.get('config') if racepak_cfg_source=='context_profile' and isinstance(_cfg_rec,dict) else str(run.metadata['ddf_config_path'])
+                        binding=racepak_exact_config_record(cfg_record, source=racepak_cfg_source or 'sibling_discovery')
+                        self.catalog.update_telemetry_session_settings(str(asset['id']),{'racepak_ddf_config':binding})
                     apply_catalog_run_authority(self.catalog,run_id,run)
                     # Mapping precedence is deliberate and conservative:
                     # importer auto < exact context profile < this exact data log.

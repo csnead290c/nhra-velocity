@@ -970,6 +970,7 @@ def load_telemetry(
     vendor: str = "Auto",
     channel_overrides: Optional[Dict[str, str]] = None,
     unit_overrides: Optional[Dict[str, str]] = None,
+    racepak_config_path: str | Path | None = None,
 ) -> TelemetryRun:
     path = Path(path)
     if not path.exists():
@@ -1008,7 +1009,7 @@ def load_telemetry(
             run = parse_racepak_rpk(path)
         elif key in {"racepak ddf", "racepak_ddf", "ddf"}:
             from .racepak_ddf import parse_racepak_ddf
-            run = parse_racepak_ddf(path)
+            run = parse_racepak_ddf(path, config_path=racepak_config_path)
         elif key == "motec":
             from .motec_ld import parse_motec_ld
             run = parse_motec_ld(path)

@@ -1,5 +1,17 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.17 — Contextual RacePak DDF Config Profiles
+
+- Added managed RacePak DDF configuration profiles so a selected `.rcg` or prior `.rpk` definition can be assigned explicitly to **Driver + Category** or **Vehicle + Category**. There is intentionally no RacePak-vendor-global config rule.
+- Added **Data → RacePak DDF Configuration…** and Command Palette access. The dialog shows exact-data-log and reusable-profile authority, validates `_CONNECT4_COMMAND` ids/sample rates against the active DDF, and makes the save scope explicit.
+- Selected RacePak configs are copied into Velocity app-data using SHA-256 content addressing. Profiles therefore do not depend on a user's Downloads/USB/card folder continuing to exist.
+- When a DDF is attached to an authoritative Tech Services Run, Velocity automatically resolves the applicable config using conservative precedence: **exact data-log config → Vehicle/Category profile → Driver/Category profile → sibling RCG discovery → raw DDF channel IDs**.
+- Every attached DDF that successfully uses a config is pinned to the exact managed config fingerprint in its telemetry-session settings. Future edits to the reusable driver/category profile cannot silently reinterpret historical runs.
+- Common Channel mappings are kept separate from RacePak config identity. Applying a config supplies source-channel names/units; the engineer still explicitly decides which source is Engine Speed, Driveshaft Speed, etc. Exact Common Channel selections remain higher authority.
+- Config changes can translate existing exact Common Channel selections only when the same stable RacePak `_CONNECT4_COMMAND` id exists in both decodes; Velocity does not guess based on similar names.
+- DDF parsing now records config SHA/path provenance and warns when a selected config leaves recorded channel ids unmatched. Duplicate ids and sample-rate mismatches continue to fail closed.
+- `load_telemetry()` now accepts an explicit `racepak_config_path` for deterministic DDF processing.
+
 ## v0.38.0-dev.16 — Context-Safe Common Channel Profiles
 
 - Reworked learned Common Channel behavior around a conservative authority hierarchy: **exact data-log assignment → explicit context profile → importer auto-detection**. An engineer can deliberately choose a different Engine Speed source for one data set without a reusable profile silently changing it back on reopen.

@@ -1,10 +1,10 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.16**
+Validated build: **0.38.0-dev.17**
 
 ## Scope
 
-This validation covers the dev.16 context-safe Common Channel profile hardening on top of the dev.15 Common Channel / Math Channel Builder foundation on top of the dev.14 packaged-Windows reliability gate and product audit on top of the dev.13.1 startup hardening, dev.13 analysis/statistics consistency work, durable Run-data reopen, ATLAS-style waveform interaction, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
+This validation covers the dev.17 contextual RacePak DDF configuration profiles on top of the dev.16 context-safe Common Channel profile hardening on top of the dev.15 Common Channel / Math Channel Builder foundation on top of the dev.14 packaged-Windows reliability gate and product audit on top of the dev.13.1 startup hardening, dev.13 analysis/statistics consistency work, durable Run-data reopen, ATLAS-style waveform interaction, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
 
 ## Results
 
@@ -94,3 +94,13 @@ The earlier persistence regression only proved that the Run→Asset row and mana
 - Strict release audit with the pinned RSA/Tech Services SHAs reports **0 errors / 0 warnings**. The manifest remains pinned to those verified upstream revisions.
 - Workbook loading explicitly suppresses global learned Common Channel preferences, restores workbook-specific mappings first, then reapplies math definitions. This preserves saved-project determinism.
 - Math dependency reapplication removes stale calculated results, evaluates definitions in dependency order, and rejects cycles so a remap cannot silently produce a dependent channel from an old intermediate value.
+
+## dev.17 RacePak DDF config-profile validation
+
+- Full automated suite: **265 passed, 1 Qt-only test skipped** in the Linux packaging environment before final version/documentation-only edits.
+- Added regression coverage proving an explicit `.rcg` can name/unit a DDF through `load_telemetry(..., racepak_config_path=...)`.
+- Driver+Category profiles are context-isolated: another driver in the same category does not inherit the config. Vehicle+Category profiles intentionally win over the broader Driver+Category profile when both are present.
+- Selected configuration files are copied into Velocity-managed app data and remain usable after the original source file is deleted.
+- Exact telemetry-session bindings take precedence over reusable profiles and are hash-verified before use.
+- DDF/config mismatch handling remains fail-closed for duplicate `_CONNECT4_COMMAND` ids and sample-rate mismatches; partial channel-id coverage is surfaced as a data warning rather than silently guessed.
+- The existing Common Channel layer remains independent, so a RacePak config can define a channel name without automatically declaring that signal to be the engineering Engine Speed/Driveshaft Speed source.

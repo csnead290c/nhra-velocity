@@ -401,6 +401,8 @@ def parse_racepak_ddf(
         "ddf_sample_rates_hz": {name_for_id[d.channel_id]: d.sample_rate_hz for d in structure.recorded_descriptors},
         "ddf_scaling": "signed int16 / 10^(256-flags) for flags FC-FF; integer for flag 00",
         "ddf_config_file": selected_config.name if selected_config else None,
+        "ddf_config_path": str(selected_config.resolve()) if selected_config else None,
+        "ddf_config_sha256": sha256(selected_config.read_bytes()).hexdigest() if selected_config else None,
         "ddf_config_bound_channels": len(binding.by_channel_id) if binding else 0,
         "ddf_unmatched_channel_ids": list(binding.unmatched_ddf_ids) if binding else [d.channel_id for d in structure.recorded_descriptors],
         "original_channel_map": dict(channel_map),
@@ -409,6 +411,12 @@ def parse_racepak_ddf(
         metadata["data_warnings"] = [
             "Raw RacePak DDF samples were decoded directly, but no matching RCG/RPK configuration was supplied. "
             "Channels are identified by stable RacePak channel id; NHRA Velocity did not guess channel names or canonical roles."
+        ]
+    elif binding.unmatched_ddf_ids:
+        metadata["data_warnings"] = [
+            "The selected RacePak configuration did not define every recorded DDF channel id. "
+            "Matched channels use the configuration names/units; unmatched channels retain stable RacePak channel-id labels: "
+            + ", ".join(map(str, binding.unmatched_ddf_ids[:20]))
         ]
 
     run = TelemetryRun(
