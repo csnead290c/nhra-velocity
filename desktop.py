@@ -46,7 +46,7 @@ except ImportError as exc:  # pragma: no cover - environment dependent
     )
     raise
 
-from runlab.branding import PRODUCT_NAME, PRODUCT_VERSION
+from runlab.branding import PRODUCT_NAME, PRODUCT_TAGLINE, PRODUCT_VERSION
 from runlab.product_manifest import WORKBOOK_FORMAT_VERSION
 from runlab.importers import load_telemetry, apply_channel_overrides, auto_map_channels, CANONICAL_CHANNELS, telemetry_file_candidate
 from runlab.models import TelemetryRun, Environment, TimingData
@@ -67,7 +67,7 @@ from runlab.plotability import choose_default_plot_channels, assess_plotability
 from runlab.display_data import channel_xy, prepare_plot_series
 from runlab.display_cache import DisplaySeriesCache
 from runlab.selftest import run_data_pipeline_selftest, format_selftest
-from runlab.resources import bundled_examples_dir
+from runlab.resources import bundled_examples_dir, brand_asset
 from runlab.diagnostics import configure_logging, log_dir
 from runlab.compare import reference_delta_series, delta_statistics
 from runlab.compare_sets import CompareRun, CompareSet, CompareSetLibrary
@@ -101,6 +101,8 @@ from runlab.racepak_config_profiles import (
     profile_scope_options as racepak_config_profile_scope_options,
     save_profile as save_racepak_config_profile,
     delete_profile as delete_racepak_config_profile,
+    list_profiles as list_racepak_config_profiles,
+    delete_profile_key as delete_racepak_config_profile_key,
     config_path_from_profile as racepak_config_path_from_profile,
     exact_binding_from_settings as racepak_exact_config_binding,
     exact_binding_record as racepak_exact_config_record,
@@ -134,6 +136,20 @@ from runlab.run_workspace import build_run_workspace
 APP_ORG = "NHRA"
 APP_ID = "NHRA.Velocity"
 PROJECT_EXT = ".nhratech"
+
+
+def _application_icon() -> QtGui.QIcon:
+    """Load the bundled product icon without making branding a startup risk."""
+    for name in ("nhra-velocity.ico", "nhra-velocity-256.png", "nhra-velocity-64.png"):
+        try:
+            path = brand_asset(name)
+            if path.is_file():
+                icon = QtGui.QIcon(str(path))
+                if not icon.isNull():
+                    return icon
+        except Exception:
+            logging.exception("Could not load brand asset %s", name)
+    return QtGui.QIcon()
 
 # Drag-racing oriented Quick Graphs.  These are canonical-role requests rather
 # than vendor channel names, so the same worksheet works across RacePak,
@@ -3940,6 +3956,8 @@ class Worksheet(QtWidgets.QMainWindow):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
+        icon=_application_icon()
+        if not icon.isNull(): self.setWindowIcon(icon)
         self.setWindowTitle(f"{PRODUCT_NAME} — Data Analysis — {PRODUCT_VERSION}")
         self.resize(1540, 940)
         self.setAcceptDrops(True)
@@ -4008,6 +4026,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.a_shift_report=QtGui.QAction('Pro Stock Shift Report…',self); self.a_shift_report.setShortcut('Ctrl+Shift+P'); self.a_shift_report.triggered.connect(self._pro_stock_shift_report)
         self.a_shortcuts=QtGui.QAction('Keyboard Shortcuts…',self); self.a_shortcuts.triggered.connect(self._show_keyboard_shortcuts)
         self.a_integration_status=QtGui.QAction('Tech Services Integration Status…',self); self.a_integration_status.triggered.connect(self._show_integration_status)
+        self.a_data_setup=QtGui.QAction('Data Log Setup / Readiness…',self); self.a_data_setup.setShortcut('Ctrl+Alt+D'); self.a_data_setup.triggered.connect(self._show_data_log_readiness)
+        self.a_racepak_profiles=QtGui.QAction('RacePak Configuration Profiles…',self); self.a_racepak_profiles.triggered.connect(self._racepak_profile_manager)
+        self.a_about=QtGui.QAction('About NHRA Velocity…',self); self.a_about.triggered.connect(self._show_about)
         self.a_layout_simple=QtGui.QAction('Simple Workspace',self); self.a_layout_simple.setShortcut('Ctrl+1'); self.a_layout_simple.triggered.connect(lambda:self._apply_workspace_layout('simple'))
         self.a_layout_investigation=QtGui.QAction('Investigation Workspace',self); self.a_layout_investigation.setShortcut('Ctrl+2'); self.a_layout_investigation.triggered.connect(lambda:self._apply_workspace_layout('investigation'))
         self.a_layout_full=QtGui.QAction('Full Engineering Workspace',self); self.a_layout_full.setShortcut('Ctrl+3'); self.a_layout_full.triggered.connect(lambda:self._apply_workspace_layout('full'))
@@ -4183,7 +4204,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for preset in QUICK_GRAPH_PRESETS:
             qg.addAction(preset, lambda checked=False, name=preset: self._apply_quick_graph(name))
         add=m.addMenu('Add Display'); add.addAction(self.a_wave); add.addAction(self.a_values); add.addAction(self.a_gauge); add.addAction(self.a_region_stats); add.addAction(self.a_scatter); add.addAction(self.a_hist); add.addAction(self.a_spectrum); add.addAction(self.a_load_map); add.addAction(self.a_metric_report); add.addAction(self.a_saved_report); add.addAction(self.a_saved_trend); add.addAction(self.a_strip_model); add.addAction(self.a_envelope); add.addAction(self.a_delta); add.addAction(self.a_comparison_summary); add.addAction(self.a_events); add.addAction(self.a_alarm_status); add.addAction(self.a_notepad); add.addAction(self.a_audit); add.addAction(self.a_sensor_health); add.addAction(self.a_knowledge)
-        m=self.menuBar().addMenu('&Data'); m.addAction('Run Details / Setup…',lambda:self.metadata.setFocus()); m.addAction(self.a_common_channels); m.addAction(self.a_racepak_config); m.addAction(self.a_math); m.addAction(self.a_gate); libm=m.addMenu('Analysis Definition Library'); [libm.addAction(a) for a in (self.a_library_import,self.a_library_export,self.a_library_capture,self.a_library_constant,self.a_library_metric,self.a_library_segment,self.a_library_condition,self.a_library_event_rule,self.a_library_report)]; m.addSeparator(); m.addAction(self.a_site_sync); m.addAction(self.a_attach_selected_run); m.addAction(self.a_keep_offline); m.addAction(self.a_capture_snapshot); m.addAction(self.a_history); m.addSeparator(); m.addAction(self.a_apply_sync)
+        m=self.menuBar().addMenu('&Data'); m.addAction('Run Details / Setup…',lambda:self.metadata.setFocus()); m.addAction(self.a_data_setup); m.addSeparator(); m.addAction(self.a_common_channels); m.addAction(self.a_racepak_config); m.addAction(self.a_racepak_profiles); m.addAction(self.a_math); m.addAction(self.a_gate); libm=m.addMenu('Analysis Definition Library'); [libm.addAction(a) for a in (self.a_library_import,self.a_library_export,self.a_library_capture,self.a_library_constant,self.a_library_metric,self.a_library_segment,self.a_library_condition,self.a_library_event_rule,self.a_library_report)]; m.addSeparator(); m.addAction(self.a_site_sync); m.addAction(self.a_attach_selected_run); m.addAction(self.a_keep_offline); m.addAction(self.a_capture_snapshot); m.addAction(self.a_history); m.addSeparator(); m.addAction(self.a_apply_sync)
         m.addAction('Data Integrity Audit…',self._show_audit); m.addAction(self.a_sensor_health)
         m=self.menuBar().addMenu('&Analysis')
         quick=m.addMenu('Quick Analysis')
@@ -4203,7 +4224,7 @@ class MainWindow(QtWidgets.QMainWindow):
         lm=m.addMenu('Workspace Layout'); lm.addAction(self.a_layout_simple); lm.addAction(self.a_layout_investigation); lm.addAction(self.a_layout_full); m.addAction(self.a_focus_analysis)
         m.addSeparator()
         for dock in self.findChildren(QtWidgets.QDockWidget): m.addAction(dock.toggleViewAction())
-        m=self.menuBar().addMenu('&Help'); m.addAction(self.a_shortcuts); m.addAction(self.a_integration_status); m.addSeparator(); m.addAction(self.a_import_support); m.addAction(self.a_selftest); m.addAction(self.a_demo); m.addSeparator(); m.addAction(self.a_logs)
+        m=self.menuBar().addMenu('&Help'); m.addAction(self.a_about); m.addSeparator(); m.addAction(self.a_shortcuts); m.addAction(self.a_integration_status); m.addSeparator(); m.addAction(self.a_import_support); m.addAction(self.a_selftest); m.addAction(self.a_demo); m.addSeparator(); m.addAction(self.a_logs)
 
     def _duplicate_current_sheet(self):
         source=self.current_sheet(); base=self.worksheets.tabText(self.worksheets.currentIndex())
@@ -4225,7 +4246,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ('Add Scatter',lambda:self.current_sheet().add_scatter()),('Add Histogram',lambda:self.current_sheet().add_histogram()),
             ('Add FFT / PSD Spectrum',lambda:self.current_sheet().add_spectrum()),('Add Load / Heat Map',lambda:self.current_sheet().add_load_map()),('Add Segment / KPI Report',lambda:self.current_sheet().add_metric_report()),('Add NHRA Strip / Model Residuals',lambda:self.current_sheet().add_strip_model()),('Add Multi-Run Envelope',lambda:self.current_sheet().add_envelope()),
             ('Add Reference Delta',lambda:self.current_sheet().add_delta()),('Add Run Comparison Summary',lambda:self.current_sheet().add_comparison_summary()),('Add Alarm Status',lambda:self.current_sheet().add_alarm_status()),('Add Cursor Region Statistics',lambda:self.current_sheet().add_region_stats()),('Add Sensor Health',lambda:self.current_sheet().add_sensor_health()),
-            ('Pro Stock Shift Report…',self._pro_stock_shift_report),('Common Channel Mapping…',self._common_channel_mapping_dialog),('RacePak DDF Configuration…',self._racepak_config_dialog),('Math Channel Builder…',self._new_math_channel),('Data Gate…',self._new_data_gate),('Reconstruct Delivered Power…',self._reconstruct_power),
+            ('Pro Stock Shift Report…',self._pro_stock_shift_report),('Data Log Setup / Readiness…',self._show_data_log_readiness),('Common Channel Mapping…',self._common_channel_mapping_dialog),('RacePak DDF Configuration…',self._racepak_config_dialog),('RacePak Configuration Profiles…',self._racepak_profile_manager),('Math Channel Builder…',self._new_math_channel),('Data Gate…',self._new_data_gate),('Reconstruct Delivered Power…',self._reconstruct_power),
             ('Inference Center…',self._inference_center),('Create Compare Run…',self._create_compare_run),('Save Current Compare Set…',self._save_current_compare_set),('Apply Named Compare Set…',self._apply_named_compare_set),('Next Reference Run',lambda:self._step_compare_reference(1)),('Previous Reference Run',lambda:self._step_compare_reference(-1)),('Simulation Study Center…',self._simulation_study_center),('Capture Vehicle Model Snapshot…',self._capture_model_snapshot),('Engineering History…',self._engineering_history),('Sync NHRA Tech Services Data…',self._sync_tech_services_data),('Attach Data Log to Selected Run…',self._attach_local_telemetry_to_selected_run),('Keep Active Asset Offline',self._keep_active_offline),
             ('Run Import / Plot Data Self-Test…',self._run_data_selftest),('Open Diagnostic Log Folder',self._open_log_folder),
         ]
@@ -4587,8 +4608,8 @@ class MainWindow(QtWidgets.QMainWindow):
             'Shift+click waveform — place reference cursor directly &nbsp;&nbsp; Ctrl+click — place cursor B<br><br>'
             '<b>Application</b><br>'
             'Ctrl+O — open log &nbsp;&nbsp; Ctrl+S — save workbook &nbsp;&nbsp; Ctrl+K — command palette<br>'
-            'Ctrl+P / Ctrl+Q — channel search / Quick Access &nbsp;&nbsp; Ctrl+M — Math Channel Builder &nbsp;&nbsp; Ctrl+Alt+M — Common Channel Mapping<br>Ctrl+I — inference center<br>'
-            'Ctrl+Shift+P — Pro Stock shift report &nbsp;&nbsp; Ctrl+Shift+R — A-B statistics display<br>'
+            'Ctrl+P / Ctrl+Q — channel search / Quick Access &nbsp;&nbsp; Ctrl+M — Math Channel Builder &nbsp;&nbsp; Ctrl+Alt+M — Common Channel Mapping<br>Ctrl+Alt+D — Data Log Setup / Readiness &nbsp;&nbsp; Ctrl+I — inference center<br>'
+            'Ctrl+Shift+P — Pro Stock shift report &nbsp;&nbsp; Ctrl+Shift+R — Ref-to-Cursor statistics display<br>'
             'Ctrl+Alt+Left / Right — step Compare reference Run &nbsp;&nbsp; Ctrl+Enter — focus/restore analysis workspace<br><br>'
             'Additional McLaren-style bindings will be added deliberately as their exact behavior is verified; the application will not silently assign familiar keys to different actions.'
         )
@@ -4697,6 +4718,132 @@ class MainWindow(QtWidgets.QMainWindow):
                 'unit_overrides':dict(handle.unit_overrides),
             },
         )
+
+    def _show_about(self):
+        dlg=QtWidgets.QDialog(self); dlg.setWindowTitle(f'About {PRODUCT_NAME}'); dlg.resize(560,430)
+        lay=QtWidgets.QVBoxLayout(dlg); lay.setContentsMargins(28,24,28,24); lay.setSpacing(14)
+        icon_label=QtWidgets.QLabel(); icon_label.setAlignment(QtCore.Qt.AlignCenter)
+        pix=QtGui.QPixmap(str(brand_asset('nhra-velocity-256.png')))
+        if not pix.isNull(): icon_label.setPixmap(pix.scaled(112,112,QtCore.Qt.KeepAspectRatio,QtCore.Qt.SmoothTransformation))
+        lay.addWidget(icon_label)
+        title=QtWidgets.QLabel(PRODUCT_NAME); title.setAlignment(QtCore.Qt.AlignCenter)
+        f=title.font(); f.setPointSize(max(f.pointSize()+8,18)); f.setBold(True); title.setFont(f); lay.addWidget(title)
+        tagline=QtWidgets.QLabel(PRODUCT_TAGLINE); tagline.setAlignment(QtCore.Qt.AlignCenter); tagline.setWordWrap(True); lay.addWidget(tagline)
+        version=QtWidgets.QLabel(f'Version {PRODUCT_VERSION}'); version.setAlignment(QtCore.Qt.AlignCenter); lay.addWidget(version)
+        body=QtWidgets.QLabel(
+            'NHRA technical data analysis, multi-vendor logger review, vehicle-performance reconstruction and simulation.\n\n'
+            'Authoritative Run identity comes from NHRA Tech Services; local data logs and engineering definitions remain explicit and auditable.'
+        ); body.setWordWrap(True); body.setAlignment(QtCore.Qt.AlignCenter); lay.addWidget(body)
+        lay.addStretch(1)
+        buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close); buttons.rejected.connect(dlg.reject); buttons.accepted.connect(dlg.accept); lay.addWidget(buttons)
+        dlg.exec()
+
+    def _show_data_log_readiness(self):
+        h=self.store.active
+        if not h:
+            rid=self.run_browser.selected_run_id() if hasattr(self,'run_browser') else ''
+            record=self.catalog.get_run(rid) if rid else None
+            if record:
+                QtWidgets.QMessageBox.information(
+                    self,'Data Log Setup / Readiness',
+                    f"{record.get('driver_name') or 'Selected Run'} — {record.get('category') or ''}\n\n"
+                    'The authoritative Run is selected, but no local data log is currently open. Attach or open a data log to review configuration readiness.'
+                )
+            else:
+                QtWidgets.QMessageBox.information(self,'Data Log Setup / Readiness','Open a data log or select an authoritative Tech Services Run first.')
+            return
+        run=h.run
+        originals=run.metadata.get('original_channel_map',{}) if isinstance(run.metadata.get('original_channel_map'),dict) else {}
+        mapped=[]
+        for spec in common_channel_specs():
+            src=str(originals.get(spec.key) or '')
+            if src: mapped.append((spec.label,src))
+        core_keys=['engine_rpm','driveshaft_rpm','speed_mph','throttle_pct','gear','longitudinal_g']
+        core=[]
+        for key in core_keys:
+            src=str(originals.get(key) or '')
+            core.append((common_channel_label(key),src or 'Not mapped'))
+        manual_zero=launch_time_override(run)
+        warnings=[str(x) for x in (run.metadata.get('data_warnings') or [])]
+        source_format=str(run.metadata.get('source_format') or run.vendor or 'Unknown')
+        racepak_line='Not applicable'
+        if self._racepak_is_ddf_handle(h):
+            exact={}
+            if h.catalog_asset_id:
+                session=self.catalog.get_telemetry_session(str(h.catalog_asset_id)) or {}
+                exact=racepak_exact_config_binding(session.get('settings') or {})
+            profile=matching_racepak_config_profile(run)
+            if exact:
+                cfg=exact.get('config') if isinstance(exact.get('config'),dict) else exact
+                racepak_line='Exact data-log config — '+str((cfg or {}).get('filename') or 'managed config')
+            elif profile:
+                cfg=profile.get('config') or {}
+                racepak_line='Reusable context profile — '+str(cfg.get('filename') or 'managed config')
+            elif run.metadata.get('ddf_config_path'):
+                racepak_line='Active config — '+Path(str(run.metadata.get('ddf_config_path'))).name
+            else:
+                racepak_line='Raw DDF channel ids only — config profile recommended'
+        timing_present=any(getattr(run.timing,name,None) not in (None,'') for name in ('sixty_ft_s','three_thirty_ft_s','eighth_mile_s','quarter_mile_s'))
+        weather_present=bool(run.metadata.get('environment_provenance'))
+        rows=''.join(f'<tr><td>{html.escape(label)}</td><td>{html.escape(src)}</td></tr>' for label,src in core)
+        warn_html='<br>'.join('• '+html.escape(w) for w in warnings[:8]) if warnings else 'None'
+        run_text=('Yes — '+html.escape(h.catalog_run_id)) if h.catalog_run_id else 'No — scratch/local session'
+        html_text=(
+            f'<h2>{html.escape(h.label)}</h2>'
+            '<table cellspacing="6">'
+            f'<tr><td><b>Source</b></td><td>{html.escape(source_format)}</td></tr>'
+            f'<tr><td><b>Authoritative Run</b></td><td>{run_text}</td></tr>'
+            f'<tr><td><b>Managed attachment</b></td><td>{"Yes" if h.catalog_asset_id else "No"}</td></tr>'
+            f'<tr><td><b>RacePak definition</b></td><td>{html.escape(racepak_line)}</td></tr>'
+            f'<tr><td><b>Common Channels</b></td><td>{len(mapped)} mapped</td></tr>'
+            f'<tr><td><b>Math channels</b></td><td>{len(run.metadata.get("math_channels") or [])}</td></tr>'
+            f'<tr><td><b>Launch zero</b></td><td>{("Manual @ %.6f s" % manual_zero) if manual_zero is not None else "Automatic detection"}</td></tr>'
+            f'<tr><td><b>Official timing</b></td><td>{"Present" if timing_present else "Not present"}</td></tr>'
+            f'<tr><td><b>Weather</b></td><td>{"Present" if weather_present else "Not present"}</td></tr>'
+            '</table>'
+            f'<h3>Core drag-racing Common Channels</h3><table cellspacing="6">{rows}</table>'
+            f'<h3>Data warnings</h3><p>{warn_html}</p>'
+        )
+        dlg=QtWidgets.QDialog(self); dlg.setWindowTitle('Data Log Setup / Readiness'); dlg.resize(760,620)
+        lay=QtWidgets.QVBoxLayout(dlg); view=QtWidgets.QTextBrowser(); view.setHtml(html_text); lay.addWidget(view,1)
+        row=QtWidgets.QHBoxLayout(); common=QtWidgets.QPushButton('Common Channels…'); math_btn=QtWidgets.QPushButton('Math Channels…'); race=QtWidgets.QPushButton('RacePak Config…'); close=QtWidgets.QPushButton('Close')
+        row.addWidget(common); row.addWidget(math_btn)
+        if self._racepak_is_ddf_handle(h): row.addWidget(race)
+        row.addStretch(1); row.addWidget(close); lay.addLayout(row)
+        common.clicked.connect(lambda: (dlg.accept(), self._common_channel_mapping_dialog()))
+        math_btn.clicked.connect(lambda: (dlg.accept(), self._new_math_channel()))
+        race.clicked.connect(lambda: (dlg.accept(), self._racepak_config_dialog()))
+        close.clicked.connect(dlg.accept); dlg.exec()
+
+    def _racepak_profile_manager(self):
+        dlg=QtWidgets.QDialog(self); dlg.setWindowTitle('RacePak Configuration Profiles'); dlg.resize(980,500)
+        lay=QtWidgets.QVBoxLayout(dlg)
+        note=QtWidgets.QLabel('Reusable RacePak definitions are deliberately narrow. Exact per-data-log configuration remains higher authority than these defaults.'); note.setWordWrap(True); lay.addWidget(note)
+        table=QtWidgets.QTableWidget(0,7); table.setHorizontalHeaderLabels(['Scope','Driver / Vehicle','Category','Config','Channels','Updated','Status']); table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows); table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection); table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers); lay.addWidget(table,1)
+        records=[]
+        def refresh():
+            nonlocal records
+            records=list_racepak_config_profiles(); table.setRowCount(len(records))
+            for row_index,rec in enumerate(records):
+                ctx=rec.get('context') or {}; cfg=rec.get('config') or {}; scope=str(rec.get('scope') or '')
+                who=(ctx.get('driver_name') or ctx.get('driver_id')) if scope=='driver_category' else (ctx.get('vehicle_name') or ctx.get('car_number') or ctx.get('vehicle_id'))
+                vals=[scope.replace('_',' + ').title(),str(who or ''),str(ctx.get('category') or ''),str(cfg.get('filename') or ''),str(cfg.get('connect4_definition_count') or ''),str(rec.get('updated_at') or ''),('Ready' if rec.get('valid') else 'Missing / changed config')]
+                for col,val in enumerate(vals):
+                    item=QtWidgets.QTableWidgetItem(val); item.setData(QtCore.Qt.UserRole,rec.get('profile_key') if col==0 else None); table.setItem(row_index,col,item)
+                if table.item(row_index,3): table.item(row_index,3).setToolTip(str(cfg.get('managed_path') or '')+'\nSHA-256: '+str(cfg.get('sha256') or ''))
+            table.resizeColumnsToContents(); table.horizontalHeader().setStretchLastSection(True)
+        refresh()
+        row=QtWidgets.QHBoxLayout(); add=QtWidgets.QPushButton('Add / Replace for Current Run…'); remove=QtWidgets.QPushButton('Delete Selected'); refresh_btn=QtWidgets.QPushButton('Refresh'); close=QtWidgets.QPushButton('Close'); row.addWidget(add); row.addWidget(remove); row.addWidget(refresh_btn); row.addStretch(1); row.addWidget(close); lay.addLayout(row)
+        def add_current():
+            dlg.hide(); self._racepak_config_dialog(); dlg.show(); refresh()
+        def remove_selected():
+            r=table.currentRow()
+            if r<0 or r>=len(records): return
+            rec=records[r]; cfg=rec.get('config') or {}
+            answer=QtWidgets.QMessageBox.question(dlg,'Delete RacePak profile',f"Delete reusable profile for {cfg.get('filename') or 'this configuration'}?\n\nExact configurations already pinned to historical DDFs are not removed.")
+            if answer==QtWidgets.QMessageBox.Yes:
+                delete_racepak_config_profile_key(str(rec.get('profile_key') or '')); refresh()
+        add.clicked.connect(add_current); remove.clicked.connect(remove_selected); refresh_btn.clicked.connect(refresh); close.clicked.connect(dlg.accept); dlg.exec()
 
     @staticmethod
     def _racepak_is_ddf_handle(handle):
@@ -6799,7 +6946,9 @@ def main():
         logging.exception('Could not enable native fault logging')
 
     pg.setConfigOptions(antialias=False, background=(20,22,25), foreground=(215,215,215))
-    app=QtWidgets.QApplication(sys.argv);app.setOrganizationName(APP_ORG);app.setApplicationName(APP_ID);_style(app)
+    app=QtWidgets.QApplication(sys.argv);app.setOrganizationName(APP_ORG);app.setApplicationName(APP_ID);icon=_application_icon();
+    if not icon.isNull(): app.setWindowIcon(icon)
+    _style(app)
     win_ref={'win':None}
 
     def _unhandled(exc_type, exc_value, exc_tb):

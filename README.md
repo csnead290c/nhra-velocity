@@ -1,6 +1,11 @@
-# NHRA Velocity — Development v0.38 (dev.14 reliability gate)
+# NHRA Velocity — Development v0.38 (dev.18)
 
 NHRA Velocity is a native desktop engineering workstation for NHRA telemetry, vehicle-performance analysis, synchronized evidence, and future incident reconstruction.
+
+
+## dev.18 setup / branding consolidation
+
+The current development line now bundles production Velocity app/installer/shortcut branding, creates the desktop shortcut by default for normal installs, adds a trackside **Data Log Setup / Readiness** view, and adds a manager for reusable RacePak Driver+Category / Vehicle+Category definitions. A trusted prior `.rpk` can serve as the channel-definition source for future raw `.ddf` files from the same compatible logger configuration; exact config fingerprints remain pinned to historical attached logs. Common Channel semantics remain an explicit engineering choice rather than being inferred from RacePak names.
 
 
 ## dev.14 reliability gate
@@ -11,7 +16,7 @@ The current development line adds a formal product audit and makes packaged Wind
 
 v0.38 dev.6 also adds a deliberate **progressive-disclosure** pass. The default workspace is meant to be usable at the track without learning every analysis subsystem: the toolbar carries only the frequent path, Channel Explorer opens on class-relevant Essentials, standard class layouts create one core waveform, and the Run Workspace is reduced to Summary/Data/Engineering. Advanced diagnostics, reports, compare tooling, and RSA studies remain available without occupying the default screen.
 
-NHRA Velocity is now explicitly Run-first in the desktop: selecting an authoritative Tech Services Run opens a Run Workspace that brings official incrementals/weather, attached telemetry evidence, standardized class/RSA defaults, saved derived reports and model snapshots together under one Run identity. Pro Stock shift reports are persisted in the local catalog as immutable fingerprinted Run metadata, and the workspace compares the latest shift report to the previous same-driver Pro Stock report to flag meaningful shift-RPM/time changes. The catalog schema is v8.
+NHRA Velocity is now explicitly Run-first in the desktop: selecting an authoritative Tech Services Run opens a Run Workspace that brings official incrementals/weather, attached telemetry evidence, standardized class/RSA defaults, saved derived reports and model snapshots together under one Run identity. Pro Stock shift reports are persisted in the local catalog as immutable fingerprinted Run metadata, and the workspace compares the latest shift report to the previous same-driver Pro Stock report to flag meaningful shift-RPM/time changes. The catalog schema is v9.
 
 v0.38 moves NHRA Velocity from release-folder development toward a maintained application lifecycle. The source tree now has a Git branch/release model, semantic version source-of-truth, GitHub Actions CI, repeatable Windows installer packaging, and a feed-agnostic updater that verifies release size/SHA-256 and can require Windows Authenticode before launching an installer. Normal users remain on a normal installed executable; engineering/development builds stay separate. See `DEVELOPMENT.md` and `RELEASE_PROCESS.md`.
 

@@ -104,3 +104,27 @@ def test_context_profile_is_used_when_no_exact_binding(tmp_path: Path, monkeypat
     assert source=='context_profile'
     assert Path(path).is_file()
     assert profile['scope']=='driver_category'
+
+
+def test_profile_manager_lists_and_deletes_by_persisted_key(tmp_path: Path, monkeypatch):
+    from runlab.racepak_config_profiles import list_profiles, delete_profile_key
+    monkeypatch.setenv('NHRA_VELOCITY_HOME',str(tmp_path/'home'))
+    cfg=tmp_path/'profile.rcg';cfg.write_bytes(_config_blob())
+    saved=save_profile(_record(),cfg,scope='driver_category')
+    rows=list_profiles()
+    assert len(rows)==1
+    assert rows[0]['profile_key']==saved['profile_key']
+    assert rows[0]['valid'] is True
+    assert delete_profile_key(saved['profile_key']) is True
+    assert list_profiles()==[]
+
+
+def test_profile_manager_surfaces_stale_managed_config(tmp_path: Path, monkeypatch):
+    from runlab.racepak_config_profiles import list_profiles
+    monkeypatch.setenv('NHRA_VELOCITY_HOME',str(tmp_path/'home'))
+    cfg=tmp_path/'profile.rcg';cfg.write_bytes(_config_blob())
+    saved=save_profile(_record(),cfg,scope='driver_category')
+    Path(saved['config']['managed_path']).unlink()
+    rows=list_profiles()
+    assert len(rows)==1
+    assert rows[0]['valid'] is False

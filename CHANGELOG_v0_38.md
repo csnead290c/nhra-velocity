@@ -1,5 +1,16 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.18 — Branding, Setup Readiness and RacePak Profile Management
+
+- Added a production NHRA Velocity brand asset set under `assets/`: Windows multi-resolution `.ico`, raster app icons, transparent mark/logo PNGs, and SVG mark/lockup files. The compact Windows icon uses a charcoal tile for legibility; transparent logo/mark assets remain available for in-app/documentation use.
+- The desktop now loads the bundled Velocity application icon in source and frozen builds, and Help now includes an About dialog showing product identity/version.
+- Windows PyInstaller builds now embed the Velocity `.ico` and bundle the brand assets. Inno Setup now uses the branded setup icon.
+- Normal installer setup now selects **Create a desktop shortcut** by default. The development updater also repairs/creates `NHRA Velocity Dev.lnk` and assigns the branded icon, so the next update guarantees a usable desktop shortcut.
+- Added **Data → Data Log Setup / Readiness…** (`Ctrl+Alt+D`) as a single trackside readiness view for Run authority, managed attachment status, RacePak definition source, Common Channel coverage, math-channel count, launch-zero mode, timing/weather availability, and data warnings. The dialog links directly to Common Channel, Math Channel, and RacePak setup actions.
+- Added **Data → RacePak Configuration Profiles…** to inspect reusable Driver+Category / Vehicle+Category profiles, see managed config/channel/status metadata, replace the current context profile, and delete a reusable profile without disturbing exact configurations already pinned to historical DDFs.
+- Added profile-management API coverage that surfaces stale/missing managed configurations instead of silently hiding them.
+- Corrected the Keyboard Shortcuts help text to describe the current Ref-to-Cursor statistics model and the new Data Log Setup shortcut.
+
 ## v0.38.0-dev.17 — Contextual RacePak DDF Config Profiles
 
 - Added managed RacePak DDF configuration profiles so a selected `.rcg` or prior `.rpk` definition can be assigned explicitly to **Driver + Category** or **Vehicle + Category**. There is intentionally no RacePak-vendor-global config rule.

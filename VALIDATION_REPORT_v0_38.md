@@ -1,10 +1,10 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.17**
+Validated build: **0.38.0-dev.18**
 
 ## Scope
 
-This validation covers the dev.17 contextual RacePak DDF configuration profiles on top of the dev.16 context-safe Common Channel profile hardening on top of the dev.15 Common Channel / Math Channel Builder foundation on top of the dev.14 packaged-Windows reliability gate and product audit on top of the dev.13.1 startup hardening, dev.13 analysis/statistics consistency work, durable Run-data reopen, ATLAS-style waveform interaction, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
+This validation covers the dev.18 branding/setup-readiness/profile-management pass on top of the dev.17 contextual RacePak DDF configuration profiles on top of the dev.16 context-safe Common Channel profile hardening on top of the dev.15 Common Channel / Math Channel Builder foundation on top of the dev.14 packaged-Windows reliability gate and product audit on top of the dev.13.1 startup hardening, dev.13 analysis/statistics consistency work, durable Run-data reopen, ATLAS-style waveform interaction, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
 
 ## Results
 
@@ -104,3 +104,11 @@ The earlier persistence regression only proved that the Run→Asset row and mana
 - Exact telemetry-session bindings take precedence over reusable profiles and are hash-verified before use.
 - DDF/config mismatch handling remains fail-closed for duplicate `_CONNECT4_COMMAND` ids and sample-rate mismatches; partial channel-id coverage is surfaced as a data warning rather than silently guessed.
 - The existing Common Channel layer remains independent, so a RacePak config can define a channel name without automatically declaring that signal to be the engineering Engine Speed/Driveshaft Speed source.
+
+## dev.18 branding / setup-readiness validation
+
+- Full automated suite: **269 passed, 1 Qt-only test skipped** in the Linux packaging environment before final version/documentation-only edits.
+- Added release-pipeline coverage proving the branded `.ico`/PNG/SVG assets exist, PyInstaller embeds the icon/assets, Inno Setup uses the branded setup icon, and the desktop-shortcut task is selected by default for normal installations.
+- Added reusable RacePak profile-manager regression coverage for listing/deleting profiles by persisted key and surfacing stale managed configurations as invalid instead of silently dropping them.
+- Python compilation passed. RacePak/MoTeC/MaxxECU native self-tests remain **3/3 passed**. Strict release audit with pinned RSA/Tech Services SHAs remains **0 errors / 0 warnings**.
+- The next Windows updater additionally runs the complete suite, native decoder self-test, strict release audit and the real Qt desktop smoke scenario before pushing `develop`.

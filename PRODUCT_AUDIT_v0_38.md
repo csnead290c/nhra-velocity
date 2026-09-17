@@ -1,7 +1,7 @@
 # NHRA Velocity — Product Audit v0.38
 
 Date: 2026-09-16
-Baseline: v0.38.0-dev.16
+Baseline: v0.38.0-dev.18
 
 ## Executive finding
 
@@ -114,3 +114,7 @@ A credible 1.0 is not defined by the number of menu items. It is the point where
 5. build/validate an RSA vehicle model from one or more Runs and use it for forward studies;
 6. publish a reproducible case/report with source hashes, official timing/weather, software/model versions and uncertainty;
 7. do all of the above on real NHRA Windows hardware with installer/update/crash behavior validated by automated and target-PC testing.
+
+## dev.17/dev.18 execution note — RacePak definitions + trackside setup coherence
+
+RacePak raw-DDF configuration profiles now allow a trusted `.rcg` **or prior good `.rpk`** to provide stable channel-id/name/unit definitions for future Driver+Category or Vehicle+Category DDFs while pinning the exact config fingerprint to each historical attached data log. dev.18 adds profile management and a Data Log Setup / Readiness view so RacePak definition, Common Channel mapping, math channels, launch zero, attachment authority and data warnings can be checked in one place before analysis. Branding/Windows shortcut integration is also moved into the packaged build rather than treated as external installer polish.

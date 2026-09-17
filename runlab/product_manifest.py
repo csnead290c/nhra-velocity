@@ -15,7 +15,7 @@ from typing import Any, Mapping
 from .version import __version__, __channel__
 
 PRODUCT_NAME = "NHRA Velocity"
-PRODUCT_TAGLINE = "Technical Data, Analysis & Vehicle Performance"
+PRODUCT_TAGLINE = "Technical Data, Analysis & Simulation"
 PRODUCT_VERSION = __version__
 PRODUCT_CHANNEL = __channel__
 

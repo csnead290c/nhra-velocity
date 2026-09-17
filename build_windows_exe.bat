@@ -4,7 +4,9 @@ cd /d "%~dp0"
 python -m pip install -r requirements-build-windows.txt || exit /b 1
 python -m PyInstaller --noconfirm --clean --windowed ^
   --name NHRA-Velocity ^
+  --icon "assets\nhra-velocity.ico" ^
   --collect-all pyqtgraph ^
+  --add-data "assets;assets" ^
   --add-data "examples;examples" ^
   --add-data "README.md;." ^
   --add-data "IMPORT_SUPPORT.md;." ^

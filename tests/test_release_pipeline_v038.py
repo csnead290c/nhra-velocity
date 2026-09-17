@@ -40,3 +40,25 @@ def test_installer_version_reads_same_environment_variable_as_workflows():
 
 def test_product_audit_is_bundled_into_windows_build():
     assert 'PRODUCT_AUDIT_v0_38.md' in BUILD_BAT
+
+
+def test_brand_assets_are_bundled_into_windows_executable_and_installer():
+    assets = ROOT / "assets"
+    for name in ("nhra-velocity.ico", "nhra-velocity-256.png", "nhra-velocity-logo.svg", "nhra-velocity-mark.svg"):
+        assert (assets / name).is_file(), name
+    assert '--icon "assets\\nhra-velocity.ico"' in BUILD_BAT
+    assert '--add-data "assets;assets"' in BUILD_BAT
+    assert 'SetupIconFile=..\\assets\\nhra-velocity.ico' in INSTALLER
+
+
+def test_installer_creates_desktop_shortcut_by_default():
+    assert 'Name: "{autodesktop}\\NHRA Velocity"' in INSTALLER
+    task_line = next(line for line in INSTALLER.splitlines() if line.startswith('Name: "desktopicon"'))
+    assert 'unchecked' not in task_line.lower()
+
+
+def test_development_shortcut_script_uses_velocity_icon():
+    shortcut = (ROOT / 'scripts' / 'Create-NHRA-Velocity-Dev-Shortcut.ps1').read_text(encoding='utf-8')
+    assert 'NHRA Velocity Dev.lnk' in shortcut
+    assert 'NHRA-Velocity.ico' in shortcut
+    assert 'IconLocation' in shortcut

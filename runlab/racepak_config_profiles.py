@@ -248,6 +248,46 @@ def delete_profile(record_or_run: Any, scope: str, *, path: Optional[Path] = Non
     return True
 
 
+
+def list_profiles(*, path: Optional[Path] = None) -> list[dict[str, Any]]:
+    """Return validated reusable RacePak config profiles for management UI.
+
+    Invalid/missing managed configs are returned with ``valid=False`` so the
+    user can see and remove stale definitions instead of Velocity silently
+    pretending they do not exist.
+    """
+    obj = _read_profiles(path or _profile_file())
+    out: list[dict[str, Any]] = []
+    for key, raw in sorted((obj.get("profiles") or {}).items()):
+        rec = dict(raw) if isinstance(raw, Mapping) else {}
+        cfg = dict(rec.get("config") or {}) if isinstance(rec.get("config"), Mapping) else {}
+        validated = _validated_profile(rec)
+        context = dict(rec.get("context") or {}) if isinstance(rec.get("context"), Mapping) else {}
+        out.append({
+            "profile_key": str(key),
+            "scope": str(rec.get("scope") or ""),
+            "context": context,
+            "config": cfg,
+            "updated_at": str(rec.get("updated_at") or ""),
+            "valid": bool(validated),
+        })
+    return out
+
+
+def delete_profile_key(profile_key: str, *, path: Optional[Path] = None) -> bool:
+    """Delete a profile by its persisted key (used by the manager UI)."""
+    key = str(profile_key or "").strip()
+    if not key:
+        return False
+    p = path or _profile_file()
+    obj = _read_profiles(p)
+    profiles = obj.get("profiles", {})
+    if key not in profiles:
+        return False
+    del profiles[key]
+    _atomic_write_json(p, obj)
+    return True
+
 def _validated_profile(rec: Mapping[str, Any]) -> dict[str, Any]:
     cfg = rec.get("config") if isinstance(rec, Mapping) else None
     if not isinstance(cfg, Mapping):

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 320">
+  <g transform="translate(20 22) scale(.53)">
+    <path fill="#E01E26" d="M64 92h86l106 242L364 92h84L292 424h-74z"/>
+    <path fill="#111318" d="M100 268h92l29 66h-92z"/>
+    <path fill="#111318" d="M314 268h98l-31 66h-98z"/>
+    <path fill="#E01E26" d="M95 211h116l17 39H79z"/>
+    <path fill="#E01E26" d="M302 211h133l-19 39H285z"/>
+  </g>
+  <text x="310" y="125" font-family="Segoe UI, Arial, sans-serif" font-weight="700" font-size="72" fill="#111318" letter-spacing="8">NHRA</text>
+  <text x="305" y="230" font-family="Segoe UI, Arial, sans-serif" font-weight="800" font-size="118" fill="#111318" letter-spacing="4">VELOCITY</text>
+  <rect x="310" y="255" width="710" height="8" rx="4" fill="#E01E26"/>
+  <text x="310" y="300" font-family="Segoe UI, Arial, sans-serif" font-weight="600" font-size="26" fill="#606772" letter-spacing="3">TECHNICAL DATA · ANALYSIS · SIMULATION</text>
+</svg>

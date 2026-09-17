@@ -18,3 +18,8 @@ def resource_root() -> Path:
 
 def bundled_examples_dir() -> Path:
     return resource_root()/'examples'
+
+
+def brand_asset(name: str) -> Path:
+    """Return a bundled NHRA Velocity brand asset path."""
+    return resource_root() / 'assets' / str(name)

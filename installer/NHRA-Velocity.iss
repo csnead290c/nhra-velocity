@@ -22,6 +22,7 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
+SetupIconFile=..\assets\nhra-velocity.ico
 SetupLogging=yes
 
 [Files]
@@ -32,7 +33,7 @@ Name: "{group}\NHRA Velocity"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\NHRA Velocity"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch NHRA Velocity"; Flags: nowait postinstall skipifsilent
