@@ -112,3 +112,11 @@ The earlier persistence regression only proved that the Run→Asset row and mana
 - Added reusable RacePak profile-manager regression coverage for listing/deleting profiles by persisted key and surfacing stale managed configurations as invalid instead of silently dropping them.
 - Python compilation passed. RacePak/MoTeC/MaxxECU native self-tests remain **3/3 passed**. Strict release audit with pinned RSA/Tech Services SHAs remains **0 errors / 0 warnings**.
 - The next Windows updater additionally runs the complete suite, native decoder self-test, strict release audit and the real Qt desktop smoke scenario before pushing `develop`.
+
+
+## dev.19 macOS portability validation
+
+- Core CI matrix now targets **Windows + macOS + Linux** on Python 3.13.
+- Dedicated macOS workflow builds the real PyInstaller `.app` bundle and runs the same network-free `--smoke-test` used by packaged Windows validation.
+- Added platform-contract regression coverage for stable platform ids, macOS Keychain/app-bundle capability reporting, Windows installer preservation, and `~/Library/Application Support/NHRA Velocity` app-data behavior.
+- macOS packaging includes the production VELOCITY iconset and bundle id `com.nhra.velocity`. Development artifacts remain explicitly unsigned until Developer ID/notarization gates exist.

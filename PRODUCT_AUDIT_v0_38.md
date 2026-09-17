@@ -39,13 +39,14 @@ The product north star remains three equal pillars:
 3. **One Run identity model.** A filename never discovers or owns a Run. Tech Services owns permanent identity; the local bridge is explicit and visible.
 4. **One analysis surface.** Model.* / Residual.* / calculated / measured channels should behave as peers in the same plots, statistics, reports and comparisons.
 5. **Fail visibly.** Unsupported analysis, decoder or server capability must explain what is missing instead of silently doing nothing.
-6. **Every Windows build proves it can launch.** Source tests are not enough for a packaged Qt desktop application.
+6. **Every packaged platform build proves it can launch.** Source tests are not enough for a packaged Qt desktop application. Windows remains the production target; macOS development builds now carry the same smoke-test expectation.
 
 ## Execution plan
 
 ### Phase 0 — Reliability gate (now → v0.39)
 
 - frozen and installed Windows GUI smoke tests in CI;
+- packaged macOS `.app` build + GUI smoke test in CI, with production distribution held until Developer ID signing/notarization;
 - startup/crash logging before Qt window construction;
 - automated construction/refresh smoke coverage for every ordinary Analysis display;
 - explicit action prerequisites and useful failure messages;
@@ -118,3 +119,8 @@ A credible 1.0 is not defined by the number of menu items. It is the point where
 ## dev.17/dev.18 execution note — RacePak definitions + trackside setup coherence
 
 RacePak raw-DDF configuration profiles now allow a trusted `.rcg` **or prior good `.rpk`** to provide stable channel-id/name/unit definitions for future Driver+Category or Vehicle+Category DDFs while pinning the exact config fingerprint to each historical attached data log. dev.18 adds profile management and a Data Log Setup / Readiness view so RacePak definition, Common Channel mapping, math channels, launch zero, attachment authority and data warnings can be checked in one place before analysis. Branding/Windows shortcut integration is also moved into the packaged build rather than treated as external installer polish.
+
+
+## dev.19 execution note — macOS without a second product
+
+macOS is now an explicit future target rather than an afterthought. Core CI runs on Windows, macOS and Linux, and the dedicated macOS build lane packages the real `NHRA Velocity.app` and executes the network-free desktop smoke scenario. The application continues to share one Run/catalog/workbook/math/RSA code path; platform-specific behavior is limited to packaging, credential vault integration, updater handoff and optional vendor-native bridges. Production macOS distribution remains intentionally incomplete until Developer ID signing, hardened runtime, notarization and Gatekeeper verification are automated. See `MACOS_PLAN.md`.

@@ -62,3 +62,36 @@ def test_development_shortcut_script_uses_velocity_icon():
     assert 'NHRA Velocity Dev.lnk' in shortcut
     assert 'NHRA-Velocity.ico' in shortcut
     assert 'IconLocation' in shortcut
+
+
+def test_macos_is_a_first_class_ci_target_and_builds_packaged_app():
+    ci = (ROOT / '.github' / 'workflows' / 'ci.yml').read_text(encoding='utf-8')
+    mac = (ROOT / '.github' / 'workflows' / 'macos-build.yml').read_text(encoding='utf-8')
+    assert 'macos-latest' in ci
+    assert 'runs-on: macos-latest' in mac
+    assert 'build_macos_app.sh' in mac
+    assert 'Smoke packaged macOS app' in mac
+    assert '--smoke-test' in mac
+    assert 'NHRA_VELOCITY_HOME' in mac
+    assert 'actions/upload-artifact@v4' in mac
+
+
+def test_macos_packaging_has_native_brand_and_bundle_metadata():
+    script = (ROOT / 'build_macos_app.sh').read_text(encoding='utf-8')
+    icon_script = (ROOT / 'scripts' / 'build_macos_icon.sh').read_text(encoding='utf-8')
+    assert '--osx-bundle-identifier "$BUNDLE_ID"' in script
+    assert 'com.nhra.velocity' in script
+    assert 'nhra-velocity.icns' in script
+    assert 'iconutil -c icns' in icon_script
+    iconset = ROOT / 'assets' / 'nhra-velocity.iconset'
+    assert (iconset / 'icon_16x16.png').is_file()
+    assert (iconset / 'icon_512x512@2x.png').is_file()
+
+
+def test_macos_plan_keeps_one_engine_and_requires_signed_distribution():
+    plan = (ROOT / 'MACOS_PLAN.md').read_text(encoding='utf-8')
+    assert 'One analysis engine' in plan
+    assert 'No macOS fork' in plan
+    assert 'Developer ID' in plan
+    assert 'notar' in plan.lower()
+    assert 'Keychain' in plan

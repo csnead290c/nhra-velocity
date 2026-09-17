@@ -1,0 +1,53 @@
+name: macOS Development Build
+
+on:
+  push:
+    branches: [develop, 'feature/**', 'hotfix/**', 'release/**']
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  build-macos-app:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install desktop/build requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build-macos.txt
+      - name: Run complete source tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+      - name: Native logger self-tests
+        run: python -m runlab.cli selftest
+      - name: Build macOS app
+        run: ./build_macos_app.sh
+      - name: Smoke packaged macOS app
+        env:
+          QT_QPA_PLATFORM: offscreen
+          NHRA_TECH_DEV_UNAUTHENTICATED: '1'
+          NHRA_VELOCITY_HOME: ${{ runner.temp }}/nhra-velocity-macos-smoke
+        run: |
+          APP="dist/NHRA Velocity.app"
+          "$APP/Contents/MacOS/NHRA Velocity" --smoke-test
+      - name: Inspect app bundle metadata
+        run: |
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' 'dist/NHRA Velocity.app/Contents/Info.plist'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' 'dist/NHRA Velocity.app/Contents/Info.plist'
+          file 'dist/NHRA Velocity.app/Contents/MacOS/NHRA Velocity'
+      - name: Package unsigned development app
+        run: |
+          VERSION="$(python -c 'from runlab.version import __version__; print(__version__)')"
+          ditto -c -k --sequesterRsrc --keepParent 'dist/NHRA Velocity.app' "NHRA-Velocity-macOS-unsigned-${VERSION}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NHRA-Velocity-macOS-development
+          path: NHRA-Velocity-macOS-unsigned-*.zip
+          if-no-files-found: error

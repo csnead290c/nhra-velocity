@@ -11,7 +11,7 @@ The platform has three equal pillars: **Tech Services authority**, **ATLAS/i2-cl
 - keep `PRODUCT_ARCHITECTURE.md` and the machine-readable release manifest canonical;
 - run the release-consistency audit before every frozen archive;
 - pin and record both mandatory upstream SHAs whenever reachable;
-- build a real Windows Qt launch/smoke-test pipeline in addition to headless regression tests.
+- build real packaged Qt launch/smoke-test pipelines in addition to headless regression tests; Windows is production-gated and macOS development packaging is now CI-gated.
 
 ## Priority B — Bind the real Tech Services platform
 
@@ -71,3 +71,16 @@ No production endpoint or schema is invented before the upstream contract is ver
 4. Multi-Run reconstruction and forward studies are reproducible, case-aware and publishable.
 5. Track-side offline use, synchronized evidence and protected distribution are production-ready.
 6. Large data and Qt runtime behavior are validated on real target hardware.
+
+
+## Priority G — macOS parity
+
+- keep one Qt/Python engineering codebase and one workbook/catalog format;
+- run core regression on macOS for every development change;
+- build and smoke-test `NHRA Velocity.app` in CI;
+- validate real Apple Silicon/Intel hardware needs and macOS keyboard/menu conventions;
+- sign with Developer ID, notarize, staple and distribute a normal Gatekeeper-approved package before calling macOS production-ready;
+- extend the signed update manifest/handoff to platform-specific artifacts;
+- classify vendor integrations explicitly as portable native parser, portable interchange path, or Windows-only SDK bridge rather than blocking the entire Mac application.
+
+See `MACOS_PLAN.md` for the staged acceptance plan.

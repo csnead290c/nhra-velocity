@@ -162,7 +162,18 @@ See `ARCHITECTURE.md`, `DATA_MODEL.md`, `ANALYSIS_CASES.md`, and `SYNC_CONTRACT_
 
 For a self-contained executable, run `build_windows_exe.bat` on Windows with Python installed. Frozen builds require Tech Services authorization by default. The build script can Authenticode-sign the executable when the NHRA signing certificate/timestamp environment variables are configured; development packaging can explicitly opt out of auth with `NHRA_TECH_DEV_UNAUTHENTICATED=1`.
 
-### macOS / Linux
+### macOS
+
+For source/development use:
+
+```bash
+./setup_macos.sh
+./.venv/bin/python desktop.py
+```
+
+The `develop` branch also builds an unsigned `NHRA Velocity.app` on GitHub macOS runners and executes the packaged desktop smoke scenario. Production macOS distribution is intentionally gated on Developer ID signing + notarization rather than asking engineers to bypass Gatekeeper. See `MACOS_PLAN.md`.
+
+### Linux development
 
 ```bash
 ./setup_mac_linux.sh

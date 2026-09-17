@@ -20,6 +20,7 @@ from typing import Any, Mapping
 from urllib.request import Request, urlopen
 
 from .version import __version__
+from .platform_support import current_platform_support
 
 UPDATE_MANIFEST_ENV = "NHRA_TECH_UPDATE_MANIFEST_URL"
 UPDATE_CHANNEL_ENV = "NHRA_TECH_UPDATE_CHANNEL"
@@ -220,7 +221,16 @@ def verify_windows_authenticode(path: str | Path, *, expected_subject: str | Non
 
 
 def launch_installer(path: str | Path) -> None:
-    """Launch a verified installer. The caller should close the app afterward."""
-    if os.name != "nt":
-        raise RuntimeError("NHRA Velocity automatic installer launch is currently Windows-only")
+    """Launch a verified platform installer.
+
+    Windows is production-enabled today. macOS intentionally remains fail-closed
+    until the Developer ID/notarized distribution handoff described in
+    ``MACOS_PLAN.md`` is implemented.
+    """
+    support = current_platform_support()
+    if not support.automatic_installer_launch:
+        raise RuntimeError(
+            f"NHRA Velocity automatic update installation is not yet enabled on {support.display_name}. "
+            "Use the approved platform package; macOS production updates remain gated on signing/notarization."
+        )
     subprocess.Popen([str(Path(path))], close_fds=True)  # noqa: S603

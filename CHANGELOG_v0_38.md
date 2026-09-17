@@ -1,5 +1,15 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.19 — macOS Portability Guardrails
+
+- Added `MACOS_PLAN.md` with a staged first-class macOS path: portability guardrails, real-hardware engineering beta, Developer ID/notarized distribution, cross-platform updater, and vendor-bridge classification. The intent is one analysis engine/workbook format rather than a Mac fork.
+- Added `runlab.platform_support` so packaging/update/native-integration capability decisions are explicit and testable instead of scattered OS checks. macOS is defined around Keychain, `.app` packaging, and no Windows-DLL assumptions.
+- Added `macos-latest` to the normal core CI matrix so every future feature is exercised on Windows, macOS and Linux at source-test level.
+- Added a dedicated **macOS Development Build** workflow that installs the desktop stack, runs the full suite/native self-tests, builds `NHRA Velocity.app`, launches the real packaged `--smoke-test`, inspects bundle metadata, and uploads an unsigned engineering `.app` ZIP artifact.
+- Added `build_macos_app.sh`, `requirements-build-macos.txt`, `setup_macos.sh`, `run_macos.sh`, native `.icns` generation, and a complete macOS `.iconset` derived from the VELOCITY brand assets.
+- The first macOS artifact is intentionally unsigned/unnotarized development output. Production DMG/PKG distribution will not be represented as complete until Developer ID signing, hardened runtime, notarization and Gatekeeper verification are CI-gated.
+- Current Windows install/update behavior remains unchanged; the existing updater continues to fail clearly outside Windows until the signed macOS distribution/update path is implemented.
+
 ## v0.38.0-dev.18 — Branding, Setup Readiness and RacePak Profile Management
 
 - Added a production NHRA Velocity brand asset set under `assets/`: Windows multi-resolution `.ico`, raster app icons, transparent mark/logo PNGs, and SVG mark/lockup files. The compact Windows icon uses a charcoal tile for legibility; transparent logo/mark assets remain available for in-app/documentation use.
