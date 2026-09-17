@@ -1,5 +1,15 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.16 — Context-Safe Common Channel Profiles
+
+- Reworked learned Common Channel behavior around a conservative authority hierarchy: **exact data-log assignment → explicit context profile → importer auto-detection**. An engineer can deliberately choose a different Engine Speed source for one data set without a reusable profile silently changing it back on reopen.
+- Added durable per-asset Common Channel and unit settings to the local telemetry-session catalog. For data logs attached to authoritative Tech Services Runs, exact channel selections now survive application restart independently of reusable profiles or workbook state. Catalog schema advances to v9 with an in-place `telemetry_sessions.settings_json` migration.
+- Replaced the dev.15 vendor/source-name auto-learning model with narrowly scoped reusable profiles. Supported scopes are **Driver + Category + Logger** and **Vehicle + Category + Logger**. There is intentionally no vendor-global RPM/speed mapping option.
+- Context profiles use stable catalog driver/vehicle ids when available, with category and logger vendor as part of the key. Tech Services Run authority now hydrates those stable ids into the decoded data-log context before profile selection.
+- Reusable profiles apply **all-or-none**: every mapped source must still exist and be dimensionally compatible. If the logger configuration changed, Velocity applies none of the profile instead of mixing a partial stale profile with new guesses.
+- The Common Channel Mapping, Assign Common Channel, and Channel Properties dialogs now make scope explicit. **This data log only** is always available and never deletes or mutates an existing profile; saving a reusable profile is an explicit choice.
+- Legacy dev.15 vendor-global learned records are retained in the preference file for audit/migration but are no longer auto-applied.
+
 ## v0.38.0-dev.15 — Common Channels + Math Channel Builder
 
 - Split channel naming into two explicit concepts: **Display Alias** is cosmetic/run-local, while **Common Channel** is the stable engineering identity used by comparisons, Quick Graphs, reports, RSA workflows and portable calculations. Friendly roles include Engine Speed, Driveshaft Speed, Vehicle Speed, Throttle Position, pressures, temperatures, acceleration, GPS and more.

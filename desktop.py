@@ -78,6 +78,7 @@ from runlab.envelope import multi_run_envelope
 from runlab.preferences import (
     get_channel_preference, set_channel_preference, clear_channel_preference,
     learned_common_channel_overrides, learned_mapping_for_source, remember_common_channel_mapping, forget_common_channel_mapping,
+    common_channel_profile_scope_options, matching_common_channel_profile, save_common_channel_profile,
     math_channel_templates, save_math_channel_template, delete_math_channel_template,
 )
 from runlab.sensor_health import sensor_health
@@ -4658,13 +4659,42 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_channel_explorer()
         self.statusBar().showMessage(('Added to' if enabled else 'Removed from')+f' Favorites: {channel}',3000)
 
+    def _common_channel_scope_combo(self, run, *, current_scope: str = ''):
+        combo=QtWidgets.QComboBox()
+        combo.addItem('This data log only — do not create/update a reusable profile','')
+        for scope,label in common_channel_profile_scope_options(run):
+            combo.addItem(label,scope)
+        if current_scope:
+            idx=combo.findData(current_scope)
+            if idx>=0:combo.setCurrentIndex(idx)
+        return combo
+
+    def _persist_exact_channel_settings(self, handle):
+        """Persist mapping/unit choices for this exact catalog data-log asset.
+
+        Reusable mapping profiles are only defaults for a matching context.  An
+        exact data-log choice is higher authority and must survive reopen even
+        when it intentionally disagrees with the driver/category profile.
+        """
+        if handle is None or not str(handle.catalog_asset_id or '').strip():
+            return
+        self.catalog.update_telemetry_session_settings(
+            str(handle.catalog_asset_id),
+            {
+                'common_channel_overrides':dict(handle.channel_overrides),
+                'unit_overrides':dict(handle.unit_overrides),
+            },
+        )
+
     def _assign_common_channel(self, channel):
         h=self.store.active
         if not h:return
         run=h.run
         original=run.metadata.get('original_channel_map',{}) if isinstance(run.metadata.get('original_channel_map',{}),dict) else {}
         current=next((role for role,source in original.items() if str(source)==str(channel)), '')
-        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle(f'Assign Common Channel — {channel}');dlg.resize(520,210)
+        profile=matching_common_channel_profile(run)
+        profile_scope=str(profile.get('scope') or '') if profile else ''
+        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle(f'Assign Common Channel — {channel}');dlg.resize(620,300)
         form=QtWidgets.QFormLayout(dlg)
         form.addRow('Source channel',QtWidgets.QLabel(str(channel)))
         role=QtWidgets.QComboBox();role.addItem('(not assigned)','')
@@ -4673,14 +4703,18 @@ class MainWindow(QtWidgets.QMainWindow):
             role.addItem(f'{spec.label}{suffix}',spec.key)
         idx=role.findData(current);role.setCurrentIndex(idx if idx>=0 else 0)
         form.addRow('Common channel',role)
-        remember=QtWidgets.QCheckBox(f'Remember this mapping for future {run.vendor or "same-vendor"} data logs with this source-channel name')
-        remember.setChecked(bool(current and learned_mapping_for_source(run,channel)==current))
-        form.addRow(remember)
-        note=QtWidgets.QLabel('Common channels are stable engineering roles used by Quick Graphs, comparisons, RSA tools, reports and portable math formulas. Display Alias is separate and only changes what you see on screen.')
+        scope=self._common_channel_scope_combo(run,current_scope=profile_scope)
+        form.addRow('Reusable profile',scope)
+        note=QtWidgets.QLabel(
+            'Mapping authority is intentionally narrow: this exact data log wins first; an explicitly saved '
+            'Driver/Category or Vehicle/Category profile is only a default for matching future logs; importer '
+            'auto-detection is last. Velocity does not create vendor-global RPM/speed rules.'
+        )
         note.setWordWrap(True);form.addRow(note)
         buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel);buttons.accepted.connect(dlg.accept);buttons.rejected.connect(dlg.reject);form.addRow(buttons)
         if dlg.exec()!=QtWidgets.QDialog.Accepted:return
         chosen=str(role.currentData() or '')
+        scope_key=str(scope.currentData() or '')
         try:
             if chosen:
                 target=next((spec.unit for spec in common_channel_specs() if spec.key==chosen),'')
@@ -4695,12 +4729,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 h.channel_overrides[current]=''
             h.run=apply_channel_overrides(h.run,h.channel_overrides,h.unit_overrides)
             if h.run.metadata.get('math_channels'):reapply_math_channels(h.run,list(h.run.metadata.get('math_channels',[])))
-            if remember.isChecked() and chosen:
-                remember_common_channel_mapping(h.run,str(channel),chosen)
-            elif current and learned_mapping_for_source(h.run,str(channel)):
-                forget_common_channel_mapping(h.run,str(channel))
+            self._persist_exact_channel_settings(h)
+            if scope_key and chosen:
+                # Merge the single edited assignment into the explicitly chosen
+                # narrow profile.  Choosing "This data log only" never deletes
+                # or silently rewrites an existing reusable profile.
+                remember_common_channel_mapping(h.run,str(channel),chosen,scope=scope_key)
             self.store.changed.emit();self.store.activeChanged.emit(h)
-            self.statusBar().showMessage(f'{channel} → {common_channel_label(chosen) if chosen else "unassigned"}',5000)
+            suffix=f' · saved to {scope.currentText()}' if scope_key and chosen else ' · this data log only'
+            self.statusBar().showMessage(f'{channel} → {common_channel_label(chosen) if chosen else "unassigned"}{suffix}',6000)
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self,'Common Channel Mapping',str(exc))
 
@@ -4709,14 +4746,20 @@ class MainWindow(QtWidgets.QMainWindow):
         if not h:
             QtWidgets.QMessageBox.information(self,'Common Channel Mapping','Open a data log first.');return
         run=h.run
-        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle(f'Common Channel Mapping — {h.label}');dlg.resize(900,680)
+        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle(f'Common Channel Mapping — {h.label}');dlg.resize(980,720)
         lay=QtWidgets.QVBoxLayout(dlg)
-        intro=QtWidgets.QLabel('Map this logger\'s source channels to Velocity common engineering channels. These mappings make worksheets, compare tools, reports, RSA analysis and portable math formulas independent of vendor naming.')
+        intro=QtWidgets.QLabel(
+            'Map this exact data log to Velocity common engineering channels. Exact data-log assignments are stored '
+            'with this attached asset and always win. If you explicitly save a reusable profile, it is scoped to the '
+            'matching driver/category or vehicle/category plus logger vendor — never globally by channel name.'
+        )
         intro.setWordWrap(True);lay.addWidget(intro)
         table=QtWidgets.QTableWidget();table.setColumnCount(5);table.setHorizontalHeaderLabels(['Common Channel','Expected Unit','Source Channel','Source Unit','Status']);table.verticalHeader().setVisible(False)
         specs=common_channel_specs();table.setRowCount(len(specs));table.setAlternatingRowColors(True)
         visible=[rec for rec in channel_catalog(run) if rec.numeric and rec.name in run.data.columns and rec.source_kind in {'native','rectangular'} and not str(rec.name).startswith('__')]
         originals=run.metadata.get('original_channel_map',{}) if isinstance(run.metadata.get('original_channel_map',{}),dict) else {}
+        profile=matching_common_channel_profile(run);profile_scope=str(profile.get('scope') or '') if profile else ''
+        profile_mappings=dict(profile.get('mappings',{})) if profile and isinstance(profile.get('mappings'),dict) else {}
         combos={}
         for row,spec in enumerate(specs):
             table.setItem(row,0,QtWidgets.QTableWidgetItem(spec.label));table.item(row,0).setData(QtCore.Qt.UserRole,spec.key)
@@ -4726,8 +4769,6 @@ class MainWindow(QtWidgets.QMainWindow):
             compatible_rows=[];other_rows=[]
             for rec in visible:
                 source_unit=normalize_unit(rec.unit)
-                # Keep unknown-unit channels visible, but put known compatible
-                # channels first so assignment is quick without hiding evidence.
                 compatible_known=bool(target and source_unit and compatible(source_unit,target))
                 label=rec.alias or rec.name
                 if rec.alias: label=f'{rec.alias}  ({rec.name})'
@@ -4737,13 +4778,21 @@ class MainWindow(QtWidgets.QMainWindow):
             current=str(originals.get(spec.key,'') or '')
             idx=combo.findData(current);combo.setCurrentIndex(idx if idx>=0 else 0);table.setCellWidget(row,2,combo);combos[spec.key]=combo
             table.setItem(row,3,QtWidgets.QTableWidgetItem(display_label(run.units.get(current,'')) if current else ''))
-            status='Manual' if spec.key in h.channel_overrides else ('Learned' if current and learned_mapping_for_source(run,current)==spec.key else ('Auto' if current else 'Unmapped'))
+            if spec.key in h.channel_overrides:
+                status='Data log override'
+            elif profile_mappings.get(spec.key)==current and current:
+                status='Context profile'
+            else:
+                status='Importer auto' if current else 'Unmapped'
             table.setItem(row,4,QtWidgets.QTableWidgetItem(status))
             combo.currentIndexChanged.connect(lambda _i,r=row,c=combo: table.setItem(r,3,QtWidgets.QTableWidgetItem(display_label(run.units.get(str(c.currentData() or ''),'')) if c.currentData() else '')))
         table.horizontalHeader().setSectionResizeMode(0,QtWidgets.QHeaderView.ResizeToContents);table.horizontalHeader().setSectionResizeMode(1,QtWidgets.QHeaderView.ResizeToContents);table.horizontalHeader().setSectionResizeMode(2,QtWidgets.QHeaderView.Stretch);table.horizontalHeader().setSectionResizeMode(3,QtWidgets.QHeaderView.ResizeToContents);table.horizontalHeader().setSectionResizeMode(4,QtWidgets.QHeaderView.ResizeToContents)
         lay.addWidget(table,1)
-        remember=QtWidgets.QCheckBox(f'Remember assigned source names for future {run.vendor or "same-vendor"} data logs');remember.setChecked(True);lay.addWidget(remember)
-        row=QtWidgets.QHBoxLayout();auto_btn=QtWidgets.QPushButton('Auto-detect');clear_btn=QtWidgets.QPushButton('Clear assignments');row.addWidget(auto_btn);row.addWidget(clear_btn);row.addStretch(1);lay.addLayout(row)
+        profile_row=QtWidgets.QHBoxLayout();profile_row.addWidget(QtWidgets.QLabel('Reusable profile:'))
+        scope=self._common_channel_scope_combo(run,current_scope=profile_scope);profile_row.addWidget(scope,1)
+        profile_note=QtWidgets.QLabel('Saving is optional. "This data log only" is the safest choice when you are not sure the logger configuration is truly reusable.')
+        profile_note.setWordWrap(True);profile_row.addWidget(profile_note,2);lay.addLayout(profile_row)
+        row=QtWidgets.QHBoxLayout();auto_btn=QtWidgets.QPushButton('Suggest mappings');clear_btn=QtWidgets.QPushButton('Clear assignments');row.addWidget(auto_btn);row.addWidget(clear_btn);row.addStretch(1);lay.addLayout(row)
         def auto_detect():
             guessed=auto_map_channels([rec.name for rec in visible],run.units)
             for canonical,source in guessed.items():
@@ -4756,33 +4805,35 @@ class MainWindow(QtWidgets.QMainWindow):
         buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel);buttons.accepted.connect(dlg.accept);buttons.rejected.connect(dlg.reject);lay.addWidget(buttons)
         if dlg.exec()!=QtWidgets.QDialog.Accepted:return
         try:
-            # Fail visibly on known dimensional conflicts instead of letting
-            # canonical normalization quietly reject the row after the dialog.
+            selected_map={}
             for spec in specs:
                 selected=str(combos[spec.key].currentData() or '')
-                if not selected or not spec.unit:continue
-                source_unit=normalize_unit(run.units.get(selected,''))
-                if source_unit and not compatible(source_unit,spec.unit):
-                    raise ValueError(f'{spec.label}: {selected} is {display_label(source_unit) or source_unit}, expected {spec.unit_label}.')
+                if not selected:continue
+                if spec.unit:
+                    source_unit=normalize_unit(run.units.get(selected,''))
+                    if source_unit and not compatible(source_unit,spec.unit):
+                        raise ValueError(f'{spec.label}: {selected} is {display_label(source_unit) or source_unit}, expected {spec.unit_label}.')
+                selected_map[spec.key]=selected
             changes=0
-            for spec in specs:
-                current=str(originals.get(spec.key,'') or '')
-                selected=str(combos[spec.key].currentData() or '')
+            # Record explicit differences, including deliberate clears, so this
+            # exact data log can disagree with a reusable context profile.
+            all_roles={spec.key for spec in specs}
+            for canonical in all_roles:
+                current=str(originals.get(canonical,'') or '')
+                selected=str(combos[canonical].currentData() or '')
                 if selected!=current:
-                    h.channel_overrides[spec.key]=selected
+                    h.channel_overrides[canonical]=selected
                     changes+=1
             h.run=apply_channel_overrides(h.run,h.channel_overrides,h.unit_overrides)
             if h.run.metadata.get('math_channels'):reapply_math_channels(h.run,list(h.run.metadata.get('math_channels',[])))
-            if remember.isChecked():
-                for spec in specs:
-                    previous=str(originals.get(spec.key,'') or '')
-                    selected=str(combos[spec.key].currentData() or '')
-                    if previous and previous!=selected and learned_mapping_for_source(h.run,previous)==spec.key:
-                        forget_common_channel_mapping(h.run,previous)
-                    if selected:remember_common_channel_mapping(h.run,selected,spec.key)
+            self._persist_exact_channel_settings(h)
+            scope_key=str(scope.currentData() or '')
+            if scope_key:
+                save_common_channel_profile(h.run,selected_map,scope=scope_key)
             self.store.changed.emit();self.store.activeChanged.emit(h)
             mapped=sum(1 for source in h.run.metadata.get('original_channel_map',{}).values() if source)
-            self.statusBar().showMessage(f'Common channel mapping updated — {mapped} roles mapped, {changes} changed',6000)
+            suffix=f' · profile saved: {scope.currentText()}' if scope_key else ' · no reusable profile changed'
+            self.statusBar().showMessage(f'Common channel mapping updated — {mapped} roles mapped, {changes} changed{suffix}',7000)
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self,'Common Channel Mapping',str(exc))
 
@@ -5749,8 +5800,21 @@ class MainWindow(QtWidgets.QMainWindow):
                     run=load_telemetry(path)
                     session_id=self.catalog.ensure_telemetry_session(str(asset['id']),display_name=str(asset.get('filename') or Path(path).stem),vendor=run.vendor,channel_summary={'channels':len(run.data.columns),'canonical_roles':sorted(run.channel_map.keys())})
                     apply_catalog_run_authority(self.catalog,run_id,run)
+                    # Mapping precedence is deliberate and conservative:
+                    # importer auto < exact context profile < this exact data log.
+                    profile_overrides=learned_common_channel_overrides(run)
+                    if profile_overrides:
+                        run=apply_channel_overrides(run,profile_overrides,{})
+                    session=self.catalog.get_telemetry_session(str(asset['id'])) or {}
+                    settings=session.get('settings') or {}
+                    asset_overrides=dict(settings.get('common_channel_overrides') or {}) if isinstance(settings,dict) else {}
+                    unit_overrides=dict(settings.get('unit_overrides') or {}) if isinstance(settings,dict) else {}
+                    if asset_overrides or unit_overrides:
+                        run=apply_channel_overrides(run,asset_overrides,unit_overrides)
                     run.metadata['catalog_asset_id']=asset['id'];run.metadata['catalog_telemetry_session_id']=session_id
-                    h=self.store.add(path,run,activate=(opened==0 and existing_count==0));h.catalog_run_id=run_id;h.catalog_asset_id=str(asset['id']);h.catalog_session_id=session_id;h.display_name=self._catalog_session_display_name(record,str(asset.get('filename') or Path(path).name),multiple=(len(assets)>1));self._restore_catalog_launch_zero(h)
+                    h=self.store.add(path,run,activate=(opened==0 and existing_count==0),apply_preferences=False)
+                    h.channel_overrides={**profile_overrides,**asset_overrides};h.unit_overrides=unit_overrides
+                    h.catalog_run_id=run_id;h.catalog_asset_id=str(asset['id']);h.catalog_session_id=session_id;h.display_name=self._catalog_session_display_name(record,str(asset.get('filename') or Path(path).name),multiple=(len(assets)>1));self._restore_catalog_launch_zero(h)
                     opened+=1
                 except Exception as exc:
                     logging.exception('Could not open catalog asset %s',asset.get('id'));errors.append(f"{asset.get('filename')}: {exc}")
@@ -5910,7 +5974,7 @@ class MainWindow(QtWidgets.QMainWindow):
         h=self.store.active
         if not h:return
         run=h.run
-        dlg=QtWidgets.QDialog(self); dlg.setWindowTitle(f'Channel Properties — {channel}'); dlg.resize(460,260)
+        dlg=QtWidgets.QDialog(self); dlg.setWindowTitle(f'Channel Properties — {channel}'); dlg.resize(560,340)
         form=QtWidgets.QFormLayout(dlg)
         form.addRow('Source channel',QtWidgets.QLabel(channel))
         unit=QtWidgets.QComboBox(); unit.setEditable(True)
@@ -5927,15 +5991,20 @@ class MainWindow(QtWidgets.QMainWindow):
         current_role=next((k for k,v in run.metadata.get('original_channel_map',{}).items() if v==channel),'')
         idx=role.findData(current_role); role.setCurrentIndex(max(0,idx))
         form.addRow('Common channel',role)
-        remember=QtWidgets.QCheckBox(f'Remember for future {run.vendor or "same-vendor"} logs with this source name')
-        remember.setChecked(bool(current_role and learned_mapping_for_source(run,channel)==current_role));form.addRow(remember)
+        profile=matching_common_channel_profile(run);profile_scope=str(profile.get('scope') or '') if profile else ''
+        scope=self._common_channel_scope_combo(run,current_scope=profile_scope);form.addRow('Reusable profile',scope)
         prov=run.metadata.get('unit_provenance',{}).get(channel,'native / inferred source unit')
         form.addRow('Current provenance',QtWidgets.QLabel(str(prov)))
-        note=QtWidgets.QLabel('Common-channel assignments feed portable worksheets, math, comparisons and RSA tools. Display Alias is cosmetic and separate. Raw source data is never overwritten.\nIf the unit is unknown, leave the role unassigned rather than guessing.'); note.setWordWrap(True); form.addRow(note)
+        note=QtWidgets.QLabel(
+            'The assignment above is always stored for this exact data log when it is attached to a Tech Services Run. '
+            'A reusable profile is optional and is narrowly scoped to the selected driver/category or vehicle/category plus logger. '
+            'Display Alias is cosmetic and separate. Raw source data is never overwritten.'
+        ); note.setWordWrap(True); form.addRow(note)
         buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel); buttons.accepted.connect(dlg.accept);buttons.rejected.connect(dlg.reject);form.addRow(buttons)
         if dlg.exec()!=QtWidgets.QDialog.Accepted:return
         unit_key=str(unit.currentData() or normalize_unit(unit.currentText()) or unit.currentText()).strip()
         chosen=str(role.currentData() or '')
+        scope_key=str(scope.currentData() or '')
         try:
             if chosen:
                 target=next((spec.unit for spec in common_channel_specs() if spec.key==chosen),'')
@@ -5948,8 +6017,8 @@ class MainWindow(QtWidgets.QMainWindow):
             elif current_role:h.channel_overrides[current_role]=''
             h.run=apply_channel_overrides(h.run,h.channel_overrides,h.unit_overrides)
             if h.run.metadata.get('math_channels'):reapply_math_channels(h.run,list(h.run.metadata.get('math_channels',[])))
-            if remember.isChecked() and chosen:remember_common_channel_mapping(h.run,channel,chosen)
-            elif current_role and learned_mapping_for_source(h.run,channel):forget_common_channel_mapping(h.run,channel)
+            self._persist_exact_channel_settings(h)
+            if scope_key and chosen:remember_common_channel_mapping(h.run,channel,chosen,scope=scope_key)
             self.store.changed.emit(); self.store.activeChanged.emit(h)
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self,'Channel mapping rejected',str(exc))

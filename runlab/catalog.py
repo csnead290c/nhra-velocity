@@ -193,6 +193,7 @@ class LocalCatalog:
                     display_name TEXT,
                     vendor TEXT,
                     channel_summary_json TEXT NOT NULL DEFAULT '{}',
+                    settings_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -422,6 +423,9 @@ class LocalCatalog:
             c.execute("DROP INDEX IF EXISTS idx_assets_run_hash")
             c.execute("CREATE INDEX IF NOT EXISTS idx_assets_run_hash ON assets(run_id,sha256) WHERE sha256 IS NOT NULL AND sha256 <> ''")
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_assets_remote_id ON assets(remote_id) WHERE remote_id IS NOT NULL AND remote_id <> ''")
+            telemetry_columns = {str(row[1]) for row in c.execute("PRAGMA table_info(telemetry_sessions)").fetchall()}
+            if "settings_json" not in telemetry_columns:
+                c.execute("ALTER TABLE telemetry_sessions ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}'")
 
             # v0.18 schema migration: AnalysisCase becomes the reusable multi-run
             # engineering workspace. Existing v0.17 IncidentCase rows are copied
@@ -720,6 +724,36 @@ class LocalCatalog:
             if not mapping:
                 c.execute("INSERT INTO time_mappings(id,run_id,asset_id,scale,offset_s,method,anchors_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",(new_id('tm'),run_id,asset_id,1.0,float(time_offset_s),time_method,'[]',now,now))
         return session_id
+
+    def get_telemetry_session(self, asset_id: str) -> Dict[str, Any] | None:
+        with self._connect() as c:
+            row=c.execute("SELECT * FROM telemetry_sessions WHERE asset_id=?",(str(asset_id),)).fetchone()
+        if not row:return None
+        d=dict(row)
+        d["channel_summary"]=_unjson(d.pop("channel_summary_json",None),{})
+        d["settings"]=_unjson(d.pop("settings_json",None),{})
+        return d
+
+    def update_telemetry_session_settings(self, asset_id: str, patch: Mapping[str, Any], *, replace: bool = False) -> Dict[str, Any]:
+        """Persist local workstation settings for one exact data-log asset.
+
+        These settings are deliberately separate from the source Asset metadata
+        and from reusable driver/vehicle profiles.  They are the highest local
+        authority for choices such as Common Channel assignment on this exact
+        data set.
+        """
+        asset=self.get_asset(str(asset_id))
+        if asset is None:raise KeyError(asset_id)
+        self.ensure_telemetry_session(str(asset_id),display_name=str(asset.get('filename') or ''),vendor=str(asset.get('vendor') or ''))
+        current=self.get_telemetry_session(str(asset_id)) or {}
+        settings={} if replace else dict(current.get('settings') or {})
+        for key,value in dict(patch or {}).items():
+            if value is None:settings.pop(str(key),None)
+            else:settings[str(key)]=value
+        now=utc_now()
+        with self.transaction() as c:
+            c.execute("UPDATE telemetry_sessions SET settings_json=?,updated_at=? WHERE asset_id=?",(_json(settings),now,str(asset_id)))
+        return settings
 
     def update_time_mapping(self, asset_id: str, *, scale: float, offset_s: float, method: str, confidence: float | None = None, uncertainty_s: float | None = None, anchors: Iterable[Mapping[str, float]] = ()) -> None:
         now=utc_now()

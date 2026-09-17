@@ -10,9 +10,11 @@ from runlab.importers import apply_channel_overrides
 from runlab.math_channels import add_math_channel, evaluate_run_expression, resolve_expression_references
 from runlab.models import TelemetryRun
 from runlab.preferences import (
+    common_channel_profile_scope_options,
     learned_common_channel_overrides,
     math_channel_templates,
     remember_common_channel_mapping,
+    save_common_channel_profile,
     save_math_channel_template,
 )
 
@@ -46,18 +48,58 @@ def test_channel_override_updates_durable_raw_source_and_can_explicitly_clear():
     assert "engine_rpm" not in run.channel_map
 
 
-def test_learned_common_mapping_is_vendor_scoped_and_dimension_safe(tmp_path: Path):
-    pref=tmp_path/"preferences.json"
-    a=_run("MaxxECU")
-    remember_common_channel_mapping(a,"EngSpd","engine_rpm",path=pref)
-    same=_run("MaxxECU")
-    other=_run("MoTeC")
-    assert learned_common_channel_overrides(same,path=pref)["engine_rpm"] == "EngSpd"
-    assert "engine_rpm" not in learned_common_channel_overrides(other,path=pref)
+def _authoritative_context(run: TelemetryRun, *, driver: str = "Angie Smith", driver_id: str = "drv-angie", category: str = "PRO STOCK MOTORCYCLE", vehicle_id: str = "veh-1", car_number: str = "8") -> TelemetryRun:
+    run.metadata.update({
+        "catalog_driver_id": driver_id,
+        "catalog_driver_name": driver,
+        "catalog_category": category,
+        "catalog_vehicle_id": vehicle_id,
+        "catalog_car_number": car_number,
+    })
+    return run
 
-    bad=_run("MaxxECU")
+
+def test_learned_common_mapping_is_context_scoped_and_dimension_safe(tmp_path: Path):
+    pref=tmp_path/"preferences.json"
+    a=_authoritative_context(_run("MaxxECU"))
+    remember_common_channel_mapping(a,"EngSpd","engine_rpm",scope="driver_category",path=pref)
+
+    same=_authoritative_context(_run("MaxxECU"))
+    other_driver=_authoritative_context(_run("MaxxECU"),driver="Richard Gadson",driver_id="drv-richard")
+    other_category=_authoritative_context(_run("MaxxECU"),category="PRO STOCK")
+    other_vendor=_authoritative_context(_run("MoTeC"))
+    assert learned_common_channel_overrides(same,path=pref)["engine_rpm"] == "EngSpd"
+    assert learned_common_channel_overrides(other_driver,path=pref) == {}
+    assert learned_common_channel_overrides(other_category,path=pref) == {}
+    assert learned_common_channel_overrides(other_vendor,path=pref) == {}
+
+    bad=_authoritative_context(_run("MaxxECU"))
     bad.units["EngSpd"]="psi"
-    assert "engine_rpm" not in learned_common_channel_overrides(bad,path=pref)
+    assert learned_common_channel_overrides(bad,path=pref) == {}
+
+
+def test_common_profile_never_falls_back_to_vendor_global_guess(tmp_path: Path):
+    pref=tmp_path/"preferences.json"
+    scratch=_run("RacePak")
+    assert common_channel_profile_scope_options(scratch) == []
+    try:
+        remember_common_channel_mapping(scratch,"EngSpd","engine_rpm",path=pref)
+    except ValueError as exc:
+        assert "driver" in str(exc).lower() or "category" in str(exc).lower()
+    else:
+        raise AssertionError("Context-free learned mapping must fail closed")
+
+
+def test_profile_application_is_all_or_none_when_logger_configuration_changes(tmp_path: Path):
+    pref=tmp_path/"preferences.json"
+    a=_authoritative_context(_run("RacePak"))
+    save_common_channel_profile(a,{"engine_rpm":"EngSpd","driveshaft_rpm":"DS"},scope="driver_category",path=pref)
+    same=_authoritative_context(_run("RacePak"))
+    assert learned_common_channel_overrides(same,path=pref) == {"engine_rpm":"EngSpd","driveshaft_rpm":"DS"}
+    changed=_authoritative_context(_run("RacePak"))
+    changed.data=changed.data.drop(columns=["DS"])
+    changed.units.pop("DS",None)
+    assert learned_common_channel_overrides(changed,path=pref) == {}
 
 
 def test_portable_math_common_references_follow_different_source_names():

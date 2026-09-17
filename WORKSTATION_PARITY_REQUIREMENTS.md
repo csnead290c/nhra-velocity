@@ -35,7 +35,7 @@ Status meanings:
 | --- | --- | --- |
 | Dockable/floating workbook pages | Implemented | Mature layout templates, global/local display properties, page-level compare selection |
 | Channel/parameter browser | Implemented | Groups, favorites, aliases, source/rate/unit/type metadata, drag/drop, user collections |
-| Common-channel aliases/mapping | Implemented in dev.15 | Shareable vehicle/class/team mapping profiles and server-backed libraries |
+| Common-channel aliases/mapping | Implemented in dev.15/dev.16 | Shareable/team-managed profile libraries and server-backed distribution; exact data-log overrides already persist locally |
 | Canonical channel roles | Implemented | Class/vehicle templates and auto-assignment review tooling |
 | Time-series waveform | Implemented | Reference cursors, trace bands, advanced axis properties, per-parameter scales |
 | Time / distance axes | Implemented | Improve distance reconstruction and GPS/downtrack fusion |

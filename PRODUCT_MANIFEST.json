@@ -1,10 +1,10 @@
 {
   "product": "NHRA Velocity",
   "tagline": "Technical Data, Analysis & Vehicle Performance",
-  "product_version": "0.38.0-dev.15",
+  "product_version": "0.38.0-dev.16",
   "update_channel": "development",
   "formats": {
-    "catalog_schema": 8,
+    "catalog_schema": 9,
     "workbook": 8,
     "analysis_library": 2,
     "simulation_study": 2,

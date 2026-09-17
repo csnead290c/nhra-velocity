@@ -1,7 +1,7 @@
 # NHRA Velocity — Product Audit v0.38
 
 Date: 2026-09-16
-Baseline: v0.38.0-dev.15
+Baseline: v0.38.0-dev.16
 
 ## Executive finding
 
@@ -58,7 +58,7 @@ The product north star remains three equal pillars:
 ### Phase 1 — Daily workstation completeness (v0.39 → v0.45)
 
 - stronger session/Compare Set manager and faster reference selection;
-- Common Channel mapping + learned vendor/source mappings (first foundation delivered in dev.15);
+- Common Channel mapping + context-scoped driver/category or vehicle/category profiles, with exact data-log overrides (foundation delivered in dev.15/dev.16);
 - reusable channel groups, class/vehicle/team mapping profiles and worksheet templates;
 - mature Math Channel Builder + reusable formulas (portable @Common Channel foundation delivered in dev.15);
 - trace properties and axis grouping/scaling workflow;
@@ -99,9 +99,9 @@ Dependent on verified Tech Services backend support:
 - live/replay transport using the same Run/channel/display abstractions;
 - stable plugin/SDK/job boundary.
 
-## dev.15 execution note — common engineering vocabulary
+## dev.15/dev.16 execution note — common engineering vocabulary
 
-The first Phase 1 foundation is now implemented. Velocity distinguishes **Display Alias** (cosmetic text) from **Common Channel** (engineering identity). Common Channel mappings are vendor-independent inputs to worksheets, comparisons, reports, RSA and portable math; vendor/source mappings can be explicitly taught and reused with dimensional safety. The Math Channel Builder consumes those identities through `@common_role` references so one formula survives logger naming changes. The next step is to lift those learned mappings/templates from one workstation preference file into shareable vehicle/class/team profiles and the broader Analysis Definition Library.
+The first Phase 1 foundation is now implemented. Velocity distinguishes **Display Alias** (cosmetic text) from **Common Channel** (engineering identity). Common Channel mappings are vendor-independent inputs to worksheets, comparisons, reports, RSA and portable math; reusable mappings can be explicitly taught only in narrow Driver+Category+Logger or Vehicle+Category+Logger profiles, while exact data-log choices remain higher authority and persist per attached Asset. The Math Channel Builder consumes those identities through `@common_role` references so one formula survives logger naming changes. The next step is to lift those learned mappings/templates from one workstation preference file into shareable vehicle/class/team profiles and the broader Analysis Definition Library.
 
 ## Version 1.0 acceptance test
 

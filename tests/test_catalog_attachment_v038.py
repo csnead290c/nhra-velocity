@@ -190,3 +190,49 @@ def test_managed_run_data_reopens_through_filename_preserving_alias(tmp_path: Pa
     assert len(restored.data) == 2
     assert "engine_rpm" in restored.channel_map
     assert restored.channel_map["engine_rpm"] in restored.data.columns
+
+
+def test_exact_data_log_channel_settings_persist_independently_of_reusable_profiles(tmp_path: Path):
+    db_path = tmp_path / "catalog.sqlite"
+    object_root = tmp_path / "objects"
+    catalog = LocalCatalog(path=db_path, object_store=LocalObjectStore(object_root))
+    event_id = catalog.create_event("Mapping Persistence", season=2026, remote_id="evt-map", sync_state="synced")
+    driver_id = catalog.find_or_create_driver("Angie Smith", remote_id="drv-angie")
+    vehicle_id = catalog.find_or_create_vehicle(name="PSM #8", category="PRO STOCK MOTORCYCLE", car_number="8")
+    run_id = catalog.create_run(
+        event_id=event_id,
+        driver_id=driver_id,
+        vehicle_id=vehicle_id,
+        run_key="tech-services:run-map",
+        category="PRO STOCK MOTORCYCLE",
+        car_number="8",
+        remote_id="run-map",
+        sync_state="synced",
+    )
+    source = tmp_path / "mapping-log.csv"
+    source.write_text("time,EngineA,EngineB,DS\n0,7000,7100,1000\n0.1,8000,8100,1100\n")
+    decoded = TelemetryRun(
+        name="mapping-log",
+        vendor="RacePak",
+        data=pd.DataFrame({"time":[0.0,0.1],"EngineA":[7000.0,8000.0],"EngineB":[7100.0,8100.0],"DS":[1000.0,1100.0]}),
+        channel_map={"time_s":"time"},
+        units={"time":"s","EngineA":"rpm","EngineB":"rpm","DS":"rpm"},
+    )
+    _, asset_id, _ = register_opened_telemetry(catalog, str(source), decoded, run_id=run_id, managed=True, local_attachment=True)
+    settings = catalog.update_telemetry_session_settings(
+        asset_id,
+        {
+            "common_channel_overrides":{"engine_rpm":"EngineB","driveshaft_rpm":"DS"},
+            "unit_overrides":{"EngineB":"rpm"},
+        },
+    )
+    assert settings["common_channel_overrides"]["engine_rpm"] == "EngineB"
+
+    reopened = LocalCatalog(path=db_path, object_store=LocalObjectStore(object_root))
+    session = reopened.get_telemetry_session(asset_id)
+    assert session is not None
+    assert session["settings"]["common_channel_overrides"] == {
+        "engine_rpm":"EngineB",
+        "driveshaft_rpm":"DS",
+    }
+    assert session["settings"]["unit_overrides"] == {"EngineB":"rpm"}

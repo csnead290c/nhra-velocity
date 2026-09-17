@@ -33,16 +33,17 @@ def _safe_load(path: Optional[Path]=None) -> dict:
     if _CACHE_PATH==p and _CACHE_MTIME_NS==mtime and _CACHE_OBJECT is not None:
         return dict(_CACHE_OBJECT)
     if not p.exists():
-        obj={'version':2,'channels':{},'common_channel_mappings':{},'math_templates':{}}
+        obj={'version':3,'channels':{},'common_channel_mappings':{},'common_channel_profiles':{},'math_templates':{}}
     else:
         try:
             obj=read_project_json(p)
             if not isinstance(obj.get('channels',{}),dict): obj['channels']={}
             if not isinstance(obj.get('common_channel_mappings',{}),dict): obj['common_channel_mappings']={}
+            if not isinstance(obj.get('common_channel_profiles',{}),dict): obj['common_channel_profiles']={}
             if not isinstance(obj.get('math_templates',{}),dict): obj['math_templates']={}
-            obj['version']=max(2,int(obj.get('version',1) or 1))
+            obj['version']=max(3,int(obj.get('version',1) or 1))
         except Exception:
-            obj={'version':2,'channels':{},'common_channel_mappings':{},'math_templates':{}}
+            obj={'version':3,'channels':{},'common_channel_mappings':{},'common_channel_profiles':{},'math_templates':{}}
     _CACHE_PATH=p; _CACHE_MTIME_NS=mtime; _CACHE_OBJECT=dict(obj)
     return dict(obj)
 
@@ -88,7 +89,17 @@ def clear_channel_preference(run: TelemetryRun, channel: str, *, path: Optional[
     del obj['channels'][key]; atomic_write_json(p,obj); _invalidate_cache(); return True
 
 
-# ---- Learned common-channel mappings --------------------------------------
+# ---- Context-scoped common-channel mapping profiles ------------------------
+
+# A source-channel name is not a universal engineering truth.  The same logger
+# may expose several plausible RPM/speed channels, and which one Velocity should
+# treat as the canonical engineering signal can legitimately differ between
+# drivers, vehicles, categories, or logger configurations.  Learned mappings are
+# therefore stored only in explicit, narrow context profiles.  Run/data-log
+# specific overrides remain higher authority than every reusable profile.
+
+_COMMON_PROFILE_SCOPES = ("vehicle_category", "driver_category")
+
 
 def _vendor_key(run_or_vendor) -> str:
     vendor = getattr(run_or_vendor, 'vendor', run_or_vendor)
@@ -100,69 +111,206 @@ def _source_key(source: str) -> str:
     return re.sub(r'\s+', ' ', str(source or '').strip().lower())
 
 
-def remember_common_channel_mapping(
-    run: TelemetryRun, source: str, canonical: str, *, path: Optional[Path]=None
-) -> Path:
-    """Remember one vendor/source-name -> common engineering role mapping.
+def _context_token(value: Any) -> str:
+    return re.sub(r'\s+', ' ', str(value or '').strip().lower())
 
-    Mappings are vendor-scoped on purpose.  A channel called ``RPM`` on one
-    logger family must not silently redefine an unrelated channel on another.
+
+def common_channel_profile_context(run: TelemetryRun) -> Dict[str,str]:
+    """Return the narrow identity context available for mapping profiles.
+
+    Stable catalog ids win.  Human-readable names are retained as a fallback so
+    imported/scratch runs can still describe their context, but Velocity never
+    invents a driver/category profile when that context is absent.
     """
-    source = str(source or '').strip(); canonical = str(canonical or '').strip()
-    if not source:
-        raise ValueError('Source channel is required.')
-    if canonical not in CANONICAL_CHANNELS:
-        raise ValueError(f'Unknown common channel: {canonical!r}')
-    p=path or preferences_path(); obj=_safe_load(p)
-    vendor=_vendor_key(run); key=_source_key(source)
-    obj.setdefault('common_channel_mappings',{}).setdefault(vendor,{})[key]={
-        'source':source,'canonical':canonical
+    md = run.metadata if isinstance(run.metadata, dict) else {}
+    return {
+        'vendor': _vendor_key(run),
+        'category': _context_token(md.get('catalog_category') or md.get('official_category') or md.get('category')),
+        'driver_id': _context_token(md.get('catalog_driver_id')),
+        'driver_name': _context_token(md.get('catalog_driver_name') or md.get('driver_name')),
+        'vehicle_id': _context_token(md.get('catalog_vehicle_id')),
+        'vehicle_name': _context_token(md.get('catalog_vehicle_name') or md.get('vehicle_name')),
+        'car_number': _context_token(md.get('catalog_car_number') or md.get('car_number')),
     }
-    atomic_write_json(p,obj); _invalidate_cache(); return p
 
 
-def forget_common_channel_mapping(
-    run: TelemetryRun, source: str, *, path: Optional[Path]=None
-) -> bool:
-    p=path or preferences_path(); obj=_safe_load(p); vendor=_vendor_key(run); key=_source_key(source)
-    group=obj.get('common_channel_mappings',{}).get(vendor,{})
-    if key not in group:return False
-    del group[key]
-    if not group: obj.get('common_channel_mappings',{}).pop(vendor,None)
-    atomic_write_json(p,obj); _invalidate_cache(); return True
+def common_channel_profile_scope_options(run: TelemetryRun) -> list[tuple[str,str]]:
+    """Return safe reusable mapping scopes supported by the active run.
 
-
-def learned_common_channel_overrides(run: TelemetryRun, *, path: Optional[Path]=None) -> Dict[str,str]:
-    """Return safe learned canonical->source mappings available in ``run``."""
-    obj=_safe_load(path); group=obj.get('common_channel_mappings',{}).get(_vendor_key(run),{})
-    if not isinstance(group,dict) or not group:return {}
-    # Common-role normalization currently operates on the rectangular data
-    # frame. Native-only mixed-rate channels remain visible to the workstation
-    # but are not silently promoted into the canonical physics layer.
-    names=[]
-    for n in run.data.columns:
-        text=str(n)
-        if not text.startswith('__') and text not in names:names.append(text)
-    by_key={_source_key(n):n for n in names}
-    out: Dict[str,str]={}
-    for source_key,rec in group.items():
-        if not isinstance(rec,dict):continue
-        source=by_key.get(str(source_key))
-        canonical=str(rec.get('canonical','') or '')
-        if not source or not canonical:continue
-        target=CANONICAL_TARGET_UNITS.get(canonical,'')
-        source_unit=normalize_unit(run.units.get(source,''))
-        if target and source_unit and not compatible(source_unit,target):
-            # A stale preference is never allowed to overrule dimensional safety.
-            continue
-        out[canonical]=source
+    Deliberately no vendor-global option is offered.  A broad logger-vendor rule
+    is exactly the kind of "smart" behavior that can choose the wrong physical
+    signal on another car or team.
+    """
+    c = common_channel_profile_context(run)
+    out: list[tuple[str,str]] = []
+    if c['category'] and (c['driver_id'] or c['driver_name']):
+        driver = str(run.metadata.get('catalog_driver_name') or run.metadata.get('driver_name') or 'this driver')
+        category = str(run.metadata.get('catalog_category') or run.metadata.get('official_category') or run.metadata.get('category') or 'this category')
+        out.append(('driver_category', f'Driver + Category + Logger — {driver} / {category} / {run.vendor or "logger"}'))
+    if c['category'] and (c['vehicle_id'] or c['car_number'] or c['vehicle_name']):
+        vehicle = str(run.metadata.get('catalog_vehicle_name') or run.metadata.get('vehicle_name') or run.metadata.get('catalog_car_number') or run.metadata.get('car_number') or 'this vehicle')
+        category = str(run.metadata.get('catalog_category') or run.metadata.get('official_category') or run.metadata.get('category') or 'this category')
+        out.append(('vehicle_category', f'Vehicle + Category + Logger — {vehicle} / {category} / {run.vendor or "logger"}'))
     return out
 
 
+def _profile_identity(run: TelemetryRun, scope: str) -> tuple[str, Dict[str,str]]:
+    scope = str(scope or '').strip()
+    if scope not in _COMMON_PROFILE_SCOPES:
+        raise ValueError(f'Unsupported Common Channel profile scope: {scope!r}')
+    c = common_channel_profile_context(run)
+    if not c['category']:
+        raise ValueError('A reusable Common Channel profile requires an authoritative category. Use this data log only.')
+    if scope == 'driver_category':
+        identity = c['driver_id'] or c['driver_name']
+        if not identity:
+            raise ValueError('Driver + Category mapping requires an authoritative driver. Use this data log only.')
+        key = f"driver_category|{c['vendor']}|{c['category']}|{identity}"
+    else:
+        identity = c['vehicle_id'] or c['car_number'] or c['vehicle_name']
+        if not identity:
+            raise ValueError('Vehicle + Category mapping requires an authoritative vehicle/car identity. Use this data log only.')
+        key = f"vehicle_category|{c['vendor']}|{c['category']}|{identity}"
+    return key, c
+
+
+def _profile_label(run: TelemetryRun, scope: str) -> str:
+    options = dict(common_channel_profile_scope_options(run))
+    return options.get(scope, scope.replace('_',' ').title())
+
+
+def save_common_channel_profile(
+    run: TelemetryRun,
+    mappings: Dict[str,str],
+    *,
+    scope: str = 'driver_category',
+    path: Optional[Path] = None,
+) -> Path:
+    """Save one coherent Common Channel profile for an explicit run context.
+
+    The profile is intentionally all-or-none at application time.  If a future
+    data log does not contain every mapped source with compatible dimensions,
+    Velocity applies none of the profile rather than silently mixing a partial
+    old profile with new importer guesses.
+    """
+    key, context = _profile_identity(run, scope)
+    clean: Dict[str,str] = {}
+    for canonical, source in dict(mappings or {}).items():
+        canonical = str(canonical or '').strip(); source = str(source or '').strip()
+        if not source:
+            continue
+        if canonical not in CANONICAL_CHANNELS:
+            raise ValueError(f'Unknown common channel: {canonical!r}')
+        if source not in run.data.columns:
+            raise ValueError(f'Profile source channel is not present in this data log: {source!r}')
+        target = CANONICAL_TARGET_UNITS.get(canonical,'')
+        source_unit = normalize_unit(run.units.get(source,''))
+        if target and source_unit and not compatible(source_unit,target):
+            raise ValueError(f'{source} is dimensionally incompatible with {canonical}.')
+        clean[canonical] = source
+    if not clean:
+        raise ValueError('A reusable Common Channel profile needs at least one assigned channel.')
+    p = path or preferences_path(); obj = _safe_load(p)
+    obj.setdefault('common_channel_profiles',{})[key] = {
+        'scope': scope,
+        'context': context,
+        'label': _profile_label(run, scope),
+        'mappings': clean,
+    }
+    obj['version'] = max(3, int(obj.get('version',1) or 1))
+    atomic_write_json(p,obj); _invalidate_cache(); return p
+
+
+def delete_common_channel_profile(run: TelemetryRun, scope: str, *, path: Optional[Path]=None) -> bool:
+    key, _ = _profile_identity(run, scope)
+    p=path or preferences_path(); obj=_safe_load(p); profiles=obj.get('common_channel_profiles',{})
+    if not isinstance(profiles,dict) or key not in profiles:return False
+    del profiles[key]; atomic_write_json(p,obj); _invalidate_cache(); return True
+
+
+def matching_common_channel_profile(run: TelemetryRun, *, path: Optional[Path]=None) -> Dict[str,Any]:
+    """Return the single most-specific exact reusable profile for ``run``."""
+    obj=_safe_load(path); profiles=obj.get('common_channel_profiles',{})
+    if not isinstance(profiles,dict):return {}
+    # Vehicle is narrower than driver/category when both exist.
+    for scope in ('vehicle_category','driver_category'):
+        try:key,_=_profile_identity(run,scope)
+        except ValueError:continue
+        rec=profiles.get(key,{})
+        if isinstance(rec,dict) and isinstance(rec.get('mappings'),dict):
+            out=dict(rec);out['profile_key']=key;return out
+    return {}
+
+
+def remember_common_channel_mapping(
+    run: TelemetryRun, source: str, canonical: str, *, scope: str = 'driver_category', path: Optional[Path]=None
+) -> Path:
+    """Merge one assignment into an explicit context-scoped mapping profile."""
+    key, _ = _profile_identity(run, scope)
+    obj=_safe_load(path); rec=obj.get('common_channel_profiles',{}).get(key,{}) if isinstance(obj.get('common_channel_profiles',{}),dict) else {}
+    mappings=dict(rec.get('mappings',{})) if isinstance(rec,dict) and isinstance(rec.get('mappings'),dict) else {}
+    mappings[str(canonical or '').strip()] = str(source or '').strip()
+    return save_common_channel_profile(run,mappings,scope=scope,path=path)
+
+
+def forget_common_channel_mapping(
+    run: TelemetryRun, source: str, *, scope: str = 'driver_category', path: Optional[Path]=None
+) -> bool:
+    key, _ = _profile_identity(run, scope)
+    p=path or preferences_path();obj=_safe_load(p);profiles=obj.get('common_channel_profiles',{})
+    if not isinstance(profiles,dict):return False
+    rec=profiles.get(key,{})
+    if not isinstance(rec,dict) or not isinstance(rec.get('mappings'),dict):return False
+    mappings=dict(rec['mappings']);source_key=_source_key(source)
+    changed=False
+    for canonical,mapped in list(mappings.items()):
+        if _source_key(mapped)==source_key:
+            del mappings[canonical];changed=True
+    if not changed:return False
+    if mappings:
+        rec=dict(rec);rec['mappings']=mappings;profiles[key]=rec
+    else:
+        profiles.pop(key,None)
+    atomic_write_json(p,obj);_invalidate_cache();return True
+
+
+def learned_common_channel_overrides(run: TelemetryRun, *, path: Optional[Path]=None) -> Dict[str,str]:
+    """Return one exact, all-or-none context profile available in ``run``.
+
+    This function intentionally ignores the old vendor-global v0.38-dev.15
+    ``common_channel_mappings`` records.  Those broad mappings are retained in
+    preferences for audit/migration but are never auto-applied.
+    """
+    rec=matching_common_channel_profile(run,path=path)
+    mappings=dict(rec.get('mappings',{})) if isinstance(rec.get('mappings',{}),dict) else {}
+    if not mappings:return {}
+    names={_source_key(str(n)):str(n) for n in run.data.columns if not str(n).startswith('__')}
+    resolved: Dict[str,str]={}
+    for canonical, stored_source in mappings.items():
+        source=names.get(_source_key(stored_source))
+        if not source:
+            return {}  # all-or-none safety: configuration changed
+        target=CANONICAL_TARGET_UNITS.get(canonical,'')
+        source_unit=normalize_unit(run.units.get(source,''))
+        if target and source_unit and not compatible(source_unit,target):
+            return {}
+        resolved[str(canonical)]=source
+    return resolved
+
+
 def learned_mapping_for_source(run: TelemetryRun, source: str, *, path: Optional[Path]=None) -> str:
-    obj=_safe_load(path); group=obj.get('common_channel_mappings',{}).get(_vendor_key(run),{})
-    rec=group.get(_source_key(source),{}) if isinstance(group,dict) else {}
-    return str(rec.get('canonical','') or '') if isinstance(rec,dict) else ''
+    rec=matching_common_channel_profile(run,path=path)
+    mappings=rec.get('mappings',{}) if isinstance(rec,dict) else {}
+    if not isinstance(mappings,dict):return ''
+    needle=_source_key(source)
+    for canonical,mapped in mappings.items():
+        if _source_key(mapped)==needle:return str(canonical)
+    return ''
+
+
+def learned_common_channel_profile_scope(run: TelemetryRun, *, path: Optional[Path]=None) -> str:
+    rec=matching_common_channel_profile(run,path=path)
+    return str(rec.get('scope') or '') if rec else ''
 
 
 # ---- Reusable calculated-channel templates -------------------------------

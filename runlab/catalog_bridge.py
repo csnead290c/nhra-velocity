@@ -50,7 +50,11 @@ def apply_catalog_run_authority(catalog: LocalCatalog, run_id: str, run: Telemet
     run.metadata["catalog_run_key"]=str(record.get("run_key") or "")
     run.metadata["catalog_event_id"]=str(record.get("event_id") or "")
     run.metadata["catalog_event_name"]=str(record.get("event_name") or "")
+    run.metadata["catalog_driver_id"]=str(record.get("driver_id") or "")
     run.metadata["catalog_driver_name"]=str(record.get("driver_name") or "")
+    run.metadata["catalog_vehicle_id"]=str(record.get("vehicle_id") or "")
+    run.metadata["catalog_vehicle_name"]=str(record.get("vehicle_name") or "")
+    run.metadata["catalog_entry_id"]=str(record.get("entry_id") or "")
     official_category=str(record.get("category") or "")
     run.metadata["catalog_category"]=official_category
     run.metadata["official_category"]=official_category

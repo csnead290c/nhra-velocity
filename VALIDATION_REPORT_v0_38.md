@@ -1,10 +1,10 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.15**
+Validated build: **0.38.0-dev.16**
 
 ## Scope
 
-This validation covers the dev.15 Common Channel / Math Channel Builder foundation on top of the dev.14 packaged-Windows reliability gate and product audit on top of the dev.13.1 startup hardening, dev.13 analysis/statistics consistency work, durable Run-data reopen, ATLAS-style waveform interaction, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
+This validation covers the dev.16 context-safe Common Channel profile hardening on top of the dev.15 Common Channel / Math Channel Builder foundation on top of the dev.14 packaged-Windows reliability gate and product audit on top of the dev.13.1 startup hardening, dev.13 analysis/statistics consistency work, durable Run-data reopen, ATLAS-style waveform interaction, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
 
 ## Results
 
@@ -71,6 +71,19 @@ The earlier persistence regression only proved that the Run→Asset row and mana
 - Windows development and tagged-release workflows now validate both the frozen and installed desktop with `--smoke-test`; these are intended to catch startup/Qt/PyInstaller regressions that source-only tests cannot detect.
 - The packaged smoke scenario exercises MainWindow construction, pyqtgraph rendering, live/reference cursor statistics, and representative Analysis displays without network access.
 - A broader Qt-only test constructs the normal daily Analysis display set with realistic main/reference sessions; it runs on Windows build agents where PySide6 is installed.
+
+
+## dev.16 context-safe Common Channel profile validation
+
+- Full automated suite: **260 passed, 1 Qt-only test skipped** in the Linux packaging environment.
+- Exact per-data-log Common Channel and unit overrides now persist in `telemetry_sessions.settings_json`; catalog schema migration v9 is exercised by catalog regression coverage.
+- Reusable Common Channel profiles are limited to **Driver + Category + Logger** or **Vehicle + Category + Logger**. No vendor-global learned mapping is offered or auto-applied.
+- Profile matching uses stable Tech Services catalog driver/vehicle ids when available and includes category + logger vendor in the profile identity.
+- A profile is applied **all-or-none**. Missing sources or dimensional conflicts cause the entire reusable profile to fail closed rather than partially overriding a new logger configuration.
+- Regression coverage verifies that the same vendor/source name does not cross drivers, categories, or vendors; context-free scratch logs cannot create an auto-applied profile; changed logger configurations reject stale profiles.
+- Exact attached-data settings are stored independently of reusable profiles so one data set may intentionally select a different Engine Speed source than another.
+- Native decoder/plot self-test: **3/3 passed** for bundled RacePak, MoTeC and MaxxECU pipelines.
+- Strict release audit with verified RSA/Tech Services SHAs: **0 errors / 0 warnings**.
 
 ## dev.15 Common Channel / Math validation
 
