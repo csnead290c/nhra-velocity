@@ -331,9 +331,32 @@ def parse_racepak_ddf(
     name_for_id: Dict[int, str] = {}
     used_names: Dict[str, int] = {}
 
+    global_bound = 0
+    global_defs: Dict[int, dict] = {}
+    if binding is None:
+        # Lowest-authority fallback: an empirical, conflict-free RacePak ID
+        # consensus mined from NHRA's own known RCG/RPK corpus. Exact config
+        # bindings and contextual profiles always win. This layer only improves
+        # source labels/units; it never assigns Common Channel roles.
+        try:
+            from .racepak_channel_library import lookup_verified_channel
+            for desc in structure.recorded_descriptors:
+                rec = lookup_verified_channel(desc.channel_id)
+                if rec:
+                    global_defs[desc.channel_id] = rec
+        except Exception:
+            global_defs = {}
+
     for desc in structure.recorded_descriptors:
         defn = binding.by_channel_id.get(desc.channel_id) if binding else None
-        base_name = (defn.name.strip() if defn and defn.name.strip() else f"RacePak Channel {desc.channel_id}")
+        global_def = global_defs.get(desc.channel_id) if not defn else None
+        if defn and defn.name.strip():
+            base_name = defn.name.strip()
+        elif global_def and str(global_def.get("consensus_name") or "").strip():
+            base_name = str(global_def.get("consensus_name")).strip()
+            global_bound += 1
+        else:
+            base_name = f"RacePak Channel {desc.channel_id}"
         if base_name in used_names:
             used_names[base_name] += 1
             name = f"{base_name} [{desc.channel_id}]"
@@ -341,9 +364,26 @@ def parse_racepak_ddf(
             used_names[base_name] = 1
             name = base_name
         name_for_id[desc.channel_id] = name
-        unit = normalize_unit(defn.unit) if defn and defn.unit else ""
+        if defn and defn.unit:
+            unit = normalize_unit(defn.unit)
+        elif global_def and global_def.get("consensus_unit"):
+            unit = normalize_unit(str(global_def.get("consensus_unit"))) or str(global_def.get("consensus_unit"))
+        else:
+            unit = ""
         values = decoded[desc.channel_id]
         t = np.arange(len(values), dtype=float) / float(desc.sample_rate_hz)
+        series_metadata = {
+            "racepak_connect4_command": desc.channel_id,
+            "ddf_flags": desc.flags,
+            "ddf_decimal_exponent": desc.decimal_exponent,
+            "ddf_config_rate": desc.config_rate,
+        }
+        if global_def:
+            series_metadata.update({
+                "racepak_definition_source": "global_corpus_consensus",
+                "racepak_definition_confidence": str(global_def.get("confidence") or ""),
+                "racepak_definition_distinct_configurations": int(global_def.get("distinct_configurations") or 0),
+            })
         native_channels[name] = ChannelSeries(
             name=name,
             time_s=t,
@@ -351,12 +391,7 @@ def parse_racepak_ddf(
             unit=unit,
             sample_rate_hz=float(desc.sample_rate_hz),
             decimals=desc.decimal_exponent,
-            metadata={
-                "racepak_connect4_command": desc.channel_id,
-                "ddf_flags": desc.flags,
-                "ddf_decimal_exponent": desc.decimal_exponent,
-                "ddf_config_rate": desc.config_rate,
-            },
+            metadata=series_metadata,
         )
         if unit:
             units[name] = unit
@@ -404,14 +439,22 @@ def parse_racepak_ddf(
         "ddf_config_path": str(selected_config.resolve()) if selected_config else None,
         "ddf_config_sha256": sha256(selected_config.read_bytes()).hexdigest() if selected_config else None,
         "ddf_config_bound_channels": len(binding.by_channel_id) if binding else 0,
-        "ddf_unmatched_channel_ids": list(binding.unmatched_ddf_ids) if binding else [d.channel_id for d in structure.recorded_descriptors],
+        "ddf_global_definition_bound_channels": int(global_bound),
+        "ddf_unmatched_channel_ids": list(binding.unmatched_ddf_ids) if binding else [d.channel_id for d in structure.recorded_descriptors if d.channel_id not in global_defs],
         "original_channel_map": dict(channel_map),
     }
     if not binding:
-        metadata["data_warnings"] = [
-            "Raw RacePak DDF samples were decoded directly, but no matching RCG/RPK configuration was supplied. "
-            "Channels are identified by stable RacePak channel id; NHRA Velocity did not guess channel names or canonical roles."
-        ]
+        if global_bound:
+            metadata["data_warnings"] = [
+                f"Raw RacePak DDF samples were decoded without an exact RCG/RPK configuration. {global_bound} recorded channel(s) "
+                "were labeled from VELOCITY's conflict-free NHRA RacePak channel-id consensus library. Remaining channels retain "
+                "stable RacePak channel-id labels. No Common Channel engineering roles were assigned automatically."
+            ]
+        else:
+            metadata["data_warnings"] = [
+                "Raw RacePak DDF samples were decoded directly, but no matching RCG/RPK configuration was supplied. "
+                "Channels are identified by stable RacePak channel id; NHRA Velocity did not guess channel names or canonical roles."
+            ]
     elif binding.unmatched_ddf_ids:
         metadata["data_warnings"] = [
             "The selected RacePak configuration did not define every recorded DDF channel id. "

@@ -35,7 +35,8 @@ def _make_ddf() -> bytes:
     return bytes(header) + b''.join(desc) + values
 
 
-def test_ddf_structure_and_fixed_point_frame_decode(tmp_path: Path):
+def test_ddf_structure_and_fixed_point_frame_decode(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv('NHRA_VELOCITY_HOME', str(tmp_path / 'home'))
     p = tmp_path / 'run.DDF'
     p.write_bytes(_make_ddf())
 
@@ -61,7 +62,8 @@ def test_ddf_structure_and_fixed_point_frame_decode(tmp_path: Path):
     assert any('did not guess channel names' in x for x in run.metadata['data_warnings'])
 
 
-def test_ddf_partial_final_frame_is_preserved(tmp_path: Path):
+def test_ddf_partial_final_frame_is_preserved(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv('NHRA_VELOCITY_HOME', str(tmp_path / 'home'))
     blob = _make_ddf()
     # Remove the last 16-bit sample: second frame still has both channel-2
     # samples but no channel-100 sample.
@@ -75,7 +77,8 @@ def test_ddf_partial_final_frame_is_preserved(tmp_path: Path):
     assert np.allclose(run.native_channels['RacePak Channel 100'].values, [-1.23])
 
 
-def test_ddf_unknown_scale_flag_fails_closed(tmp_path: Path):
+def test_ddf_unknown_scale_flag_fails_closed(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv('NHRA_VELOCITY_HOME', str(tmp_path / 'home'))
     header = bytearray(14)
     header[12:14] = (1).to_bytes(2, 'little')
     p = tmp_path / 'unknown.ddf'

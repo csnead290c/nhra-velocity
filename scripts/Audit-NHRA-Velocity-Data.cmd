@@ -19,9 +19,11 @@ echo.
 set /p "MODE=Quick smoke audit [Q] or full recognized-file audit [F]? (default Q): "
 if /I "%MODE%"=="F" (
   set "AUDIT_ARGS=--skip-hash"
+  set "RACEPAK_ID_ARGS=--rpk-mode all"
   set "MODE_NAME=full"
 ) else (
   set "AUDIT_ARGS=--sample-per-format 5"
+  set "RACEPAK_ID_ARGS=--rpk-mode quick --rpk-quick-limit 250"
   set "MODE_NAME=quick"
 )
 
@@ -49,6 +51,24 @@ if not "%RC%"=="0" (
   exit /b %RC%
 )
 
+echo Building empirical RacePak channel-id dictionary...
+echo This scans every RCG and, in quick mode, a representative spread of RPK files.
+echo Full mode scans every RCG and RPK definition source.
+echo.
+"%PY%" -m runlab.cli racepak-ids "%TARGET%" --recursive %RACEPAK_ID_ARGS% ^
+  --json-out "%OUT%\racepak_channel_ids.json" ^
+  --csv-out "%OUT%\racepak_channel_ids.csv" ^
+  --install
+set "RPK_RC=%ERRORLEVEL%"
+if not "%RPK_RC%"=="0" (
+  echo.
+  echo WARNING: Base corpus audit completed, but RacePak channel-id census returned %RPK_RC%.
+  echo Existing audit reports are still valid and are in: %OUT%
+)
+
+echo.
 echo Audit complete.
+echo RacePak verified channel ids were installed only as a LOWEST-AUTHORITY source-label fallback.
+echo They do NOT assign Common Channels automatically.
 start "" "%OUT%"
 pause

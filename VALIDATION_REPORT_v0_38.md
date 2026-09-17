@@ -1,12 +1,24 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.21**
+Validated build: **0.38.0-dev.22**
 
 ## Scope
 
-This validation covers the dev.21 Box corpus-audit/import-discovery hardening on top of the dev.20 Compare Workspace / portable worksheet-template work and the existing v0.38 data-log, Run-workspace, analysis, persistence, packaging, and reliability foundation.
+This validation covers the dev.22 empirical RacePak channel-id library on top of the dev.21 Box corpus-audit/import-discovery hardening, dev.20 Compare Workspace / portable worksheet-template work, and the existing v0.38 data-log, Run-workspace, analysis, persistence, packaging, and reliability foundation.
 
 ## Results
+
+
+## dev.22 empirical RacePak channel-id validation
+
+- Full automated suite: **297 passed, 1 skipped** in the Linux packaging environment.
+- Added regression coverage proving repeated race files from one identical RacePak configuration count as one semantic vote rather than manufacturing consensus confidence.
+- Three distinct conflict-free configuration signatures are required before a numeric `_CONNECT4_COMMAND` id is safe for automatic source-label fallback. Two-source agreement remains visible but is not auto-applied.
+- Conflicting source names fail closed. Conflicting non-empty units also block fallback.
+- A configless DDF can use a verified installed corpus definition to recover a source name/unit while retaining the RacePak numeric id and evidence count as channel metadata.
+- Corpus-derived source naming does **not** assign any VELOCITY Common Channel; regression coverage explicitly requires the configless run's canonical map to remain time-only until the engineer maps a role.
+- Exact RCG/RPK config and context profiles remain higher authority than the empirical library.
+- Native decoder/plot self-test remains **3/3 passed** for RacePak, MoTeC, and MaxxECU.
 
 ## dev.13 analysis/workflow hardening
 

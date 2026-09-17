@@ -1,5 +1,15 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.22 — Empirical RacePak Channel-ID Library
+
+- Added a conservative **RacePak `_CONNECT4_COMMAND` channel-id census** that mines known `.rcg` and `.rpk` definitions from the user's real data corpus. Evidence is counted by distinct configuration signature so one team with hundreds of repeated runs cannot manufacture false confidence.
+- Added conflict-aware consensus levels: **verified** (3+ distinct configurations, conflict-free), **supported** (2), **single-source**, and **conflict**. Only verified, conflict-free IDs are eligible for automatic fallback naming.
+- Configless raw `.ddf` files can now use the installed empirical library to recover source-channel names/units for verified IDs while retaining the numeric RacePak ID as provenance. Exact per-log config, Vehicle/Category profile, Driver/Category profile, and sibling RCG remain higher authority.
+- The empirical ID library **never assigns VELOCITY Common Channels automatically**. It may tell us that RacePak ID `X` has been consistently called `ENGINE RPM`; the engineer still decides whether that signal is the Common Channel **Engine Speed** for the specific data set.
+- Conflicting IDs fail closed and remain `RacePak Channel <id>`. Unit disagreements also prevent automatic fallback. Two-source agreements are reported for review but are not auto-applied.
+- Extended the one-click corpus audit so the same Quick/Full run also writes `racepak_channel_ids.csv/json` and installs the verified subset as the lowest-authority DDF source-label fallback. Quick scans every RCG plus a deterministic representative RPK spread; Full scans every RCG and every RPK.
+- Large RPK definition mining uses memory mapping to avoid loading tens-of-megabyte run files fully into RAM.
+
 ## v0.38.0-dev.21 — Box Corpus Audit + Import Discovery Hardening
 
 - Replaced the desktop's hand-maintained **Open / Attach data log** filters with a filter generated from the same import registry that routes decoders. Supported native extensions can no longer be added to the decoder layer and accidentally omitted from the default file picker; current Box `*.MaxxECU-Zip-log` files are the concrete regression case.

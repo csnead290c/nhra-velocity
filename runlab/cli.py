@@ -21,6 +21,7 @@ from .sync_contract import run_sync_payload, analysis_case_bundle, analysis_case
 from .official_runs import import_official_run_csv
 from .sync_engine import apply_tech_services_snapshot
 from .qualification import qualify_corpus, extension_inventory
+from .racepak_channel_library import build_channel_id_census, save_census, install_census
 from .import_registry import registry_rows
 from .case_playback import case_playback_frame, case_time_extent
 from .workstation import channel_catalog, evaluate_gate, MetricDefinition, drag_metric_report, resolve_channel
@@ -114,6 +115,41 @@ def cmd_qualify(args):
         detail=r.error[:120] or r.integrity_flags[:120]
         print(f"{r.status:22} {r.vendor:10} {r.filename}  channels={r.numeric_channels}  {detail}")
     if args.strict and passed != len(rows): raise SystemExit(2)
+
+
+def cmd_racepak_ids(args):
+    payload = build_channel_id_census(
+        args.paths,
+        recursive=args.recursive,
+        rpk_mode=args.rpk_mode,
+        rpk_quick_limit=args.rpk_quick_limit,
+    )
+    if args.json_out:
+        save_census(payload, args.json_out)
+    if args.csv_out:
+        frame = pd.DataFrame(payload.get("channels", []))
+        for col in ("distinct_names", "distinct_units", "sample_rates_hz", "source_kinds", "example_files"):
+            if col in frame.columns:
+                frame[col] = frame[col].map(lambda values: " | ".join(str(x) for x in (values or [])))
+        frame.to_csv(args.csv_out, index=False)
+    installed = None
+    if args.install:
+        installed = install_census(payload)
+    summary = payload.get("summary", {})
+    scan = payload.get("scan", {})
+    print(
+        "RacePak channel-id census: "
+        f"{summary.get('channel_ids', 0)} ids; "
+        f"{summary.get('verified_ids', 0)} verified, "
+        f"{summary.get('supported_ids', 0)} supported, "
+        f"{summary.get('conflicted_ids', 0)} conflicted. "
+        f"Scanned {scan.get('definition_files_scanned', 0)} definition file(s)."
+    )
+    if installed:
+        print(f"Installed conservative fallback library: {installed}")
+    warnings = payload.get("warnings", [])
+    if warnings:
+        print(f"Definition-source warnings: {len(warnings)} (see JSON report for details)")
 
 
 def cmd_selftest(args):
@@ -529,6 +565,16 @@ def main():
     s.add_argument("--skip-hash", action="store_true", help="Skip full-file SHA-256 reads for faster large-corpus sweeps")
     s.add_argument("--strict", action="store_true", help="Exit non-zero when any candidate fails")
     s.set_defaults(func=cmd_qualify)
+
+    s = sp.add_parser("racepak-ids", help="Build an empirical RacePak _CONNECT4_COMMAND channel-id census")
+    s.add_argument("paths", nargs="+", help="Files and/or folders containing RCG/RPK definitions")
+    s.add_argument("--recursive", action="store_true")
+    s.add_argument("--rpk-mode", choices=["none", "quick", "all"], default="quick", help="RCGs are always scanned; quick samples RPK folders, all scans every RPK")
+    s.add_argument("--rpk-quick-limit", type=int, default=250, help="Maximum representative RPKs in quick mode")
+    s.add_argument("--json-out")
+    s.add_argument("--csv-out")
+    s.add_argument("--install", action="store_true", help="Install verified conflict-free ids as the lowest-authority DDF naming fallback")
+    s.set_defaults(func=cmd_racepak_ids)
 
     s = sp.add_parser("selftest", help="Run bundled native import/plot pipeline diagnostics")
     s.add_argument("--examples", help="Override bundled examples directory")

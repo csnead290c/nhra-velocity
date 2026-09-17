@@ -1,7 +1,7 @@
 {
   "product": "NHRA Velocity",
   "tagline": "Technical Data, Analysis & Simulation",
-  "product_version": "0.38.0-dev.21",
+  "product_version": "0.38.0-dev.22",
   "update_channel": "development",
   "formats": {
     "catalog_schema": 9,
@@ -16,15 +16,15 @@
       "name": "RacingSystemsAnalysis",
       "repository": "https://github.com/csnead290c/RacingSystemsAnalysis",
       "role": "physics/source-fidelity reference",
-      "commit_sha": "1556ac70684908038fe47a9fe54e2f506cc4e71c",
-      "verified": true
+      "commit_sha": "unverified",
+      "verified": false
     },
     {
       "name": "nhratechservices",
       "repository": "https://github.com/csnead290c/nhratechservices",
       "role": "production identity/auth/data/API reference",
-      "commit_sha": "77eb280fe94825f93f2cdfdd3ab2568851aa6a19",
-      "verified": true
+      "commit_sha": "unverified",
+      "verified": false
     }
   ]
 }
