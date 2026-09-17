@@ -80,6 +80,7 @@ from runlab.preferences import (
     learned_common_channel_overrides, learned_mapping_for_source, remember_common_channel_mapping, forget_common_channel_mapping,
     common_channel_profile_scope_options, matching_common_channel_profile, save_common_channel_profile,
     math_channel_templates, save_math_channel_template, delete_math_channel_template,
+    worksheet_template_scope_options, worksheet_templates, save_worksheet_template, delete_worksheet_template,
 )
 from runlab.sensor_health import sensor_health
 from runlab.comparison_report import comparison_summary
@@ -109,6 +110,7 @@ from runlab.racepak_config_profiles import (
     resolve_config_path as resolve_racepak_config_path,
 )
 from runlab.racepak_ddf import parse_ddf_structure, bind_ddf_config
+from runlab.layout_profiles import capture_display_specs as capture_portable_display_specs, resolve_display_specs as resolve_portable_display_specs
 from runlab.heatmap import binned_map
 from runlab.display_analysis import paired_channel_data, linear_regression, channel_distribution, sample_channel_at
 from runlab.definition_library import (
@@ -1398,7 +1400,7 @@ class WaveformDisplay(QtWidgets.QWidget):
         ctl.setContentsMargins(4, 3, 4, 3)
         ctl.addWidget(QtWidgets.QLabel("Layout"))
         self.layout_mode = QtWidgets.QComboBox()
-        self.layout_mode.addItems(["Stacked Channels", "Stacked Units", "Overlay"])
+        self.layout_mode.addItems(["Stacked Channels", "Stacked Units", "Grouped Channels", "Overlay"])
         self.layout_mode.currentTextChanged.connect(lambda _x: self.refresh())
         ctl.addWidget(self.layout_mode)
         self.zero_label = QtWidgets.QLabel("Cursor  0.0000")
@@ -1966,6 +1968,11 @@ class WaveformDisplay(QtWidgets.QWidget):
         width = QtWidgets.QDoubleSpinBox(); width.setRange(0.5, 8.0); width.setSingleStep(0.2); width.setDecimals(1); width.setValue(float(style.get('width',1.6)))
         form.addRow('Line width', width)
 
+        axis_group = QtWidgets.QLineEdit(str(style.get('axis_group','') or ''))
+        axis_group.setPlaceholderText('Blank = its own axis')
+        axis_group.setToolTip('In Grouped Channels mode, traces with the same nonblank group name AND display unit share one waveform band. Velocity never combines incompatible units automatically.')
+        form.addRow('Axis group', axis_group)
+
         unit_box = QtWidgets.QComboBox()
         compatible_units = [k for k,v in UNITS.items() if k and source_dim != 'unknown' and v.dimension == source_dim]
         if source_unit and source_unit not in compatible_units:
@@ -2003,6 +2010,9 @@ class WaveformDisplay(QtWidgets.QWidget):
         new_style = self.channel_styles.setdefault(channel,{})
         new_style['color']=color_btn.text().strip()
         new_style['width']=float(width.value())
+        group_name=str(axis_group.text() or '').strip()
+        if group_name:new_style['axis_group']=group_name
+        else:new_style.pop('axis_group',None)
         if unit_box.isEnabled() and unit_box.currentData(): new_style['display_unit']=str(unit_box.currentData())
         else: new_style.pop('display_unit',None)
         if auto_y.isChecked():
@@ -2025,7 +2035,7 @@ class WaveformDisplay(QtWidgets.QWidget):
     def _display_properties(self):
         dlg=QtWidgets.QDialog(self); dlg.setWindowTitle('Waveform Display Properties'); dlg.resize(480,360)
         form=QtWidgets.QFormLayout(dlg)
-        layout_box=QtWidgets.QComboBox(); layout_box.addItems(['Stacked Channels','Stacked Units','Overlay']); layout_box.setCurrentText(self.layout_mode.currentText())
+        layout_box=QtWidgets.QComboBox(); layout_box.addItems(['Stacked Channels','Stacked Units','Grouped Channels','Overlay']); layout_box.setCurrentText(self.layout_mode.currentText())
         compare=QtWidgets.QCheckBox('Overlay Reference / compare sessions'); compare.setChecked(bool(self.compare))
         events=QtWidgets.QCheckBox('Show event/timing markers'); events.setChecked(self.events_box.isChecked())
         readout=QtWidgets.QCheckBox('Show cursor value table'); readout.setChecked(bool(self.show_readout))
@@ -2438,9 +2448,11 @@ class WaveformDisplay(QtWidgets.QWidget):
             self.graph.addItem(label, row=0, col=0)
             return
 
-        # i2-style display modes.  Stacked Channels gives each parameter its
-        # own scale, Stacked Units shares scales only for dimensionally equal
-        # channels, and Overlay intentionally puts everything on one graph.
+        # i2/ATLAS-style display modes. Stacked Channels gives each parameter
+        # its own scale; Stacked Units shares exact display units; Grouped
+        # Channels lets the engineer explicitly name an axis group; Overlay
+        # intentionally puts everything on one graph. Group keys include the
+        # display unit so a typo cannot silently put psi and rpm on one axis.
         groups: Dict[str, List[str]] = {}
         mode = self.layout_mode.currentText()
         for c in self.channels:
@@ -2448,7 +2460,10 @@ class WaveformDisplay(QtWidgets.QWidget):
             if mode == "Overlay":
                 key = "overlay"
             elif mode == "Stacked Units":
-                key = f"{dimension(unit)}:{unit}" if unit else f"channel:{c}"
+                key = f"unit:{dimension(unit)}:{unit}" if unit else f"channel:{c}"
+            elif mode == "Grouped Channels":
+                group_name = str(self.channel_styles.get(c, {}).get('axis_group', '') or '').strip()
+                key = f"group:{group_name}:{dimension(unit)}:{unit}" if group_name else f"channel:{c}"
             else:
                 key = f"channel:{c}"
             groups.setdefault(key, []).append(c)
@@ -4070,6 +4085,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.a_reconstruct=QtGui.QAction('Reconstruct Delivered Power…',self); self.a_reconstruct.triggered.connect(self._reconstruct_power)
         self.a_infer=QtGui.QAction('Inference Center…',self); self.a_infer.setShortcut('Ctrl+I'); self.a_infer.triggered.connect(self._inference_center)
         self.a_compare_run=QtGui.QAction('Create Compare Run…',self); self.a_compare_run.setShortcut('Ctrl+Shift+C'); self.a_compare_run.triggered.connect(self._create_compare_run)
+        self.a_compare_manager=QtGui.QAction('Compare Workspace Manager…',self); self.a_compare_manager.setShortcut('Ctrl+Shift+R'); self.a_compare_manager.triggered.connect(self._compare_workspace_manager)
         self.a_compare_set_save=QtGui.QAction('Save Current Compare Set…',self); self.a_compare_set_save.triggered.connect(self._save_current_compare_set)
         self.a_compare_set_apply=QtGui.QAction('Apply Named Compare Set…',self); self.a_compare_set_apply.triggered.connect(self._apply_named_compare_set)
         self.a_compare_set_delete=QtGui.QAction('Delete Named Compare Set…',self); self.a_compare_set_delete.triggered.connect(self._delete_named_compare_set)
@@ -4077,6 +4093,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.a_compare_ref_next=QtGui.QAction('Next Reference Run',self); self.a_compare_ref_next.setShortcut('Ctrl+Alt+Right'); self.a_compare_ref_next.triggered.connect(lambda:self._step_compare_reference(1))
         self.a_sim_study=QtGui.QAction('Simulation Study Center…',self); self.a_sim_study.setShortcut('Ctrl+Shift+S'); self.a_sim_study.triggered.connect(self._simulation_study_center)
         self.a_model_channels=QtGui.QAction('Attach RSA Model / Residual Channels…',self); self.a_model_channels.triggered.connect(self._attach_rsa_model_channels)
+        self.a_template_save=QtGui.QAction('Save Worksheet as Template…',self); self.a_template_save.triggered.connect(self._save_worksheet_template)
+        self.a_template_apply=QtGui.QAction('Apply Worksheet Template…',self); self.a_template_apply.setShortcut('Ctrl+Alt+T'); self.a_template_apply.triggered.connect(self._apply_worksheet_template)
+        self.a_template_manage=QtGui.QAction('Manage Worksheet Templates…',self); self.a_template_manage.triggered.connect(self._manage_worksheet_templates)
         self.a_account=QtGui.QAction('NHRA Tech Services Account…',self); self.a_account.triggered.connect(self._show_account_access)
         self.a_signin=QtGui.QAction('Sign in to NHRA Tech Services…',self); self.a_signin.triggered.connect(self._sign_in)
         self.a_signout=QtGui.QAction('Sign out',self); self.a_signout.triggered.connect(self._sign_out)
@@ -4091,7 +4110,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.run_selector=QtWidgets.QComboBox(); self.run_selector.setMinimumContentsLength(14); self.run_selector.setMinimumWidth(180); self.run_selector.setToolTip('Active run data log'); self.run_selector.currentIndexChanged.connect(self._toolbar_run_changed); tb.addWidget(self.run_selector)
         tb.addSeparator(); tb.addWidget(QtWidgets.QLabel(' X '))
         self.xmode=QtWidgets.QComboBox(); self.xmode.addItems(['Time from Launch','Distance from Launch','Normalized Run %','Logger Time','Sample Index']); self.xmode.currentTextChanged.connect(self._xmode_changed); tb.addWidget(self.xmode)
-        tb.addSeparator(); self.compare_box=QtWidgets.QCheckBox('Compare'); self.compare_box.setChecked(False); self.compare_box.stateChanged.connect(self._compare_changed); tb.addWidget(self.compare_box)
+        tb.addSeparator(); self.compare_box=QtWidgets.QCheckBox('Compare'); self.compare_box.setChecked(False); self.compare_box.setToolTip('Overlay the Reference/Compare sessions. Ctrl+Shift+R opens the Compare Workspace Manager.'); self.compare_box.stateChanged.connect(self._compare_changed); tb.addWidget(self.compare_box)
         self.reference_label=QtWidgets.QLabel(' Ref ');tb.addWidget(self.reference_label)
         self.reference_selector=QtWidgets.QComboBox(); self.reference_selector.setMinimumContentsLength(12); self.reference_selector.setMinimumWidth(150); self.reference_selector.setToolTip('Reference session used by waveform compare'); self.reference_selector.currentIndexChanged.connect(self._toolbar_reference_changed); tb.addWidget(self.reference_selector)
         self.reference_label.setVisible(False);self.reference_selector.setVisible(False)
@@ -4200,6 +4219,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _build_menus(self):
         m=self.menuBar().addMenu('&File'); m.addAction(self.a_open); m.addAction(self.a_folder); m.addAction(self.a_demo); m.addSeparator(); m.addAction(self.a_load); m.addAction(self.a_recovery); m.addAction(self.a_save); m.addSeparator(); m.addAction(self.a_keep_offline); m.addSeparator(); m.addAction('Exit',self.close)
         m=self.menuBar().addMenu('&Worksheet'); m.addAction(self.a_sheet); m.addAction(self.a_duplicate_sheet); m.addSeparator(); m.addAction(self.a_fit_run); m.addAction(self.a_fit_full); m.addAction(self.a_standard_layout)
+        tm=m.addMenu('Worksheet Templates'); tm.addAction(self.a_template_apply); tm.addAction(self.a_template_save); tm.addAction(self.a_template_manage)
         qg=m.addMenu('Quick Graph')
         for preset in QUICK_GRAPH_PRESETS:
             qg.addAction(preset, lambda checked=False, name=preset: self._apply_quick_graph(name))
@@ -4216,7 +4236,7 @@ class MainWindow(QtWidgets.QMainWindow):
         m.addAction(self.a_history)
         m.addSeparator()
         m.addAction(self.a_compare_run)
-        csm=m.addMenu('Compare Sets'); csm.addAction(self.a_compare_set_save); csm.addAction(self.a_compare_set_apply); csm.addAction(self.a_compare_set_delete); csm.addSeparator(); csm.addAction(self.a_compare_ref_prev); csm.addAction(self.a_compare_ref_next)
+        csm=m.addMenu('Compare Sets'); csm.addAction(self.a_compare_manager); csm.addSeparator(); csm.addAction(self.a_compare_set_save); csm.addAction(self.a_compare_set_apply); csm.addAction(self.a_compare_set_delete); csm.addSeparator(); csm.addAction(self.a_compare_ref_prev); csm.addAction(self.a_compare_ref_next)
         m.addAction(self.a_sim_study)
         m.addAction(self.a_model_channels)
         m=self.menuBar().addMenu('&Account'); m.addAction(self.a_signin); m.addAction(self.a_signout); m.addSeparator(); m.addAction(self.a_account)
@@ -4241,13 +4261,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def _command_palette(self):
         commands=[
             ('Open Log…',self.open_logs),('Open Log Folder…',self.open_log_folder),('Save Workbook…',self.save_project),
-            ('New Worksheet',lambda:self.add_worksheet()),('Duplicate Worksheet',self._duplicate_current_sheet),('Fit Drag Run (Ctrl+F)',self._fit_current_run),('Fit Full Logger Recording',self._fit_full_recording),('Apply Standard Class Layout…',self._choose_standard_layout),
+            ('New Worksheet',lambda:self.add_worksheet()),('Duplicate Worksheet',self._duplicate_current_sheet),('Apply Worksheet Template…',self._apply_worksheet_template),('Save Worksheet as Template…',self._save_worksheet_template),('Fit Drag Run (Ctrl+F)',self._fit_current_run),('Fit Full Logger Recording',self._fit_full_recording),('Apply Standard Class Layout…',self._choose_standard_layout),
             ('Add Waveform',lambda:self.current_sheet().add_waveform()),('Add Values',lambda:self.current_sheet().add_values()),('Add Gauge / Status',lambda:self.current_sheet().add_gauge()),
             ('Add Scatter',lambda:self.current_sheet().add_scatter()),('Add Histogram',lambda:self.current_sheet().add_histogram()),
             ('Add FFT / PSD Spectrum',lambda:self.current_sheet().add_spectrum()),('Add Load / Heat Map',lambda:self.current_sheet().add_load_map()),('Add Segment / KPI Report',lambda:self.current_sheet().add_metric_report()),('Add NHRA Strip / Model Residuals',lambda:self.current_sheet().add_strip_model()),('Add Multi-Run Envelope',lambda:self.current_sheet().add_envelope()),
             ('Add Reference Delta',lambda:self.current_sheet().add_delta()),('Add Run Comparison Summary',lambda:self.current_sheet().add_comparison_summary()),('Add Alarm Status',lambda:self.current_sheet().add_alarm_status()),('Add Cursor Region Statistics',lambda:self.current_sheet().add_region_stats()),('Add Sensor Health',lambda:self.current_sheet().add_sensor_health()),
             ('Pro Stock Shift Report…',self._pro_stock_shift_report),('Data Log Setup / Readiness…',self._show_data_log_readiness),('Common Channel Mapping…',self._common_channel_mapping_dialog),('RacePak DDF Configuration…',self._racepak_config_dialog),('RacePak Configuration Profiles…',self._racepak_profile_manager),('Math Channel Builder…',self._new_math_channel),('Data Gate…',self._new_data_gate),('Reconstruct Delivered Power…',self._reconstruct_power),
-            ('Inference Center…',self._inference_center),('Create Compare Run…',self._create_compare_run),('Save Current Compare Set…',self._save_current_compare_set),('Apply Named Compare Set…',self._apply_named_compare_set),('Next Reference Run',lambda:self._step_compare_reference(1)),('Previous Reference Run',lambda:self._step_compare_reference(-1)),('Simulation Study Center…',self._simulation_study_center),('Capture Vehicle Model Snapshot…',self._capture_model_snapshot),('Engineering History…',self._engineering_history),('Sync NHRA Tech Services Data…',self._sync_tech_services_data),('Attach Data Log to Selected Run…',self._attach_local_telemetry_to_selected_run),('Keep Active Asset Offline',self._keep_active_offline),
+            ('Inference Center…',self._inference_center),('Create Compare Run…',self._create_compare_run),('Compare Workspace Manager…',self._compare_workspace_manager),('Save Current Compare Set…',self._save_current_compare_set),('Apply Named Compare Set…',self._apply_named_compare_set),('Next Reference Run',lambda:self._step_compare_reference(1)),('Previous Reference Run',lambda:self._step_compare_reference(-1)),('Simulation Study Center…',self._simulation_study_center),('Capture Vehicle Model Snapshot…',self._capture_model_snapshot),('Engineering History…',self._engineering_history),('Sync NHRA Tech Services Data…',self._sync_tech_services_data),('Attach Data Log to Selected Run…',self._attach_local_telemetry_to_selected_run),('Keep Active Asset Offline',self._keep_active_offline),
             ('Run Import / Plot Data Self-Test…',self._run_data_selftest),('Open Diagnostic Log Folder',self._open_log_folder),
         ]
         labels=[x[0] for x in commands]
@@ -4383,6 +4403,209 @@ class MainWindow(QtWidgets.QMainWindow):
             if h.role == 'main': h.role = 'available'
         self.store.runs[self.store.active_index].role = 'main'
         self.store.changed.emit(); self.store.activeChanged.emit(self.store.active)
+
+    def _save_worksheet_template(self):
+        h=self.store.active
+        if h is None:
+            QtWidgets.QMessageBox.information(self,'Worksheet Template','Open a data log before saving a portable worksheet template.');return
+        ws=self.current_sheet()
+        name,ok=QtWidgets.QInputDialog.getText(self,'Save Worksheet Template','Template name:',text=self.worksheets.tabText(self.worksheets.currentIndex()))
+        if not ok or not str(name).strip():return
+        scope_options=worksheet_template_scope_options(h.run)
+        labels=[label for _key,label in scope_options]
+        label,ok=QtWidgets.QInputDialog.getItem(self,'Save Worksheet Template','Reuse scope:',labels,0,False)
+        if not ok:return
+        scope=next(key for key,text in scope_options if text==label)
+        payload={
+            'x_mode':self.xmode.currentText(),
+            'display_specs':capture_portable_display_specs(h.run,ws.display_specs()),
+            'dock_state':bytes(ws.saveState()).hex(),
+        }
+        try:
+            save_worksheet_template(str(name).strip(),payload,run=h.run,scope=scope)
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(self,'Worksheet Template',str(exc));return
+        self.statusBar().showMessage(f'Saved portable worksheet template: {str(name).strip()} ({label})',6000)
+
+    @staticmethod
+    def _template_scope_label(rec: dict) -> str:
+        scope=str(rec.get('scope') or 'global')
+        context=rec.get('context',{}) if isinstance(rec.get('context',{}),dict) else {}
+        if scope=='vehicle_category':
+            vehicle=context.get('vehicle_name') or (f"#{context.get('car_number')}" if context.get('car_number') else context.get('vehicle_id')) or 'vehicle'
+            return f"Vehicle + Category — {vehicle} / {context.get('category') or '?'}"
+        if scope=='category': return f"Category — {context.get('category') or '?'}"
+        return 'All vehicles / categories'
+
+    def _apply_worksheet_template_record(self, rec: dict):
+        h=self.store.active
+        if h is None:return
+        payload=rec.get('payload',{}) if isinstance(rec.get('payload',{}),dict) else {}
+        portable=payload.get('display_specs',[]) if isinstance(payload.get('display_specs',[]),list) else []
+        specs,missing=resolve_portable_display_specs(h.run,portable)
+        if not specs:
+            QtWidgets.QMessageBox.warning(self,'Worksheet Template','This template contains no usable display definitions.');return
+        desired_x=str(payload.get('x_mode') or self.xmode.currentText())
+        idx=self.xmode.findText(desired_x)
+        if idx>=0:self.xmode.setCurrentIndex(idx)
+        ws=self.current_sheet();ws.restore_display_specs(specs)
+        state=str(payload.get('dock_state') or '')
+        if state:
+            try:ws.restoreState(QtCore.QByteArray.fromHex(state.encode()))
+            except Exception:logging.exception('Could not restore worksheet template dock state')
+        ws.set_x_mode(self.xmode.currentText())
+        if missing:
+            preview=', '.join(missing[:6]) + ('…' if len(missing)>6 else '')
+            self.statusBar().showMessage(f"Applied template {rec.get('name','')} — {len(missing)} unavailable channel reference(s): {preview}",9000)
+        else:
+            self.statusBar().showMessage(f"Applied worksheet template: {rec.get('name','')}",5000)
+        QtCore.QTimer.singleShot(0,self._fit_current_run)
+
+    def _apply_worksheet_template(self):
+        h=self.store.active
+        if h is None:
+            QtWidgets.QMessageBox.information(self,'Worksheet Template','Open a data log before applying a worksheet template.');return
+        rows=worksheet_templates(run=h.run,compatible_only=True)
+        if not rows:
+            QtWidgets.QMessageBox.information(self,'Worksheet Template','No worksheet templates are compatible with this Run yet. Save the current worksheet as a template first.');return
+        labels=[f"{r.get('name','Template')}  —  {self._template_scope_label(r)}" for r in rows]
+        choice,ok=QtWidgets.QInputDialog.getItem(self,'Apply Worksheet Template','Template:',labels,0,False)
+        if not ok:return
+        rec=rows[labels.index(choice)]
+        self._apply_worksheet_template_record(rec)
+
+    def _manage_worksheet_templates(self):
+        h=self.store.active
+        rows=worksheet_templates(run=h.run if h else None,compatible_only=False)
+        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle('Worksheet Templates');dlg.resize(900,440)
+        v=QtWidgets.QVBoxLayout(dlg)
+        note=QtWidgets.QLabel('Templates store Common Channel identities when available. Raw source-channel references remain exact and are never fuzzy-matched on another data log.');note.setWordWrap(True);v.addWidget(note)
+        table=QtWidgets.QTableWidget(0,4);table.setHorizontalHeaderLabels(['Name','Scope','Context','Ready for active Run']);table.verticalHeader().setVisible(False);table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows);table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection);v.addWidget(table,1)
+        def fill():
+            nonlocal rows
+            rows=worksheet_templates(run=self.store.active.run if self.store.active else None,compatible_only=False)
+            table.setRowCount(len(rows))
+            for r,rec in enumerate(rows):
+                ctx=rec.get('context',{}) if isinstance(rec.get('context',{}),dict) else {}
+                context=' / '.join(x for x in [str(ctx.get('vehicle_name') or ctx.get('car_number') or ''),str(ctx.get('category') or '')] if x) or '—'
+                vals=[str(rec.get('name') or ''),str(rec.get('scope') or 'global').replace('_',' ').title(),context,'Yes' if rec.get('compatible') else 'No']
+                for c,text in enumerate(vals):
+                    item=QtWidgets.QTableWidgetItem(text);item.setData(QtCore.Qt.UserRole,str(rec.get('id') or ''));table.setItem(r,c,item)
+            table.horizontalHeader().setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch);table.horizontalHeader().setSectionResizeMode(1,QtWidgets.QHeaderView.ResizeToContents);table.horizontalHeader().setSectionResizeMode(2,QtWidgets.QHeaderView.Stretch);table.horizontalHeader().setSectionResizeMode(3,QtWidgets.QHeaderView.ResizeToContents)
+        fill()
+        buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close);apply_btn=buttons.addButton('Apply',QtWidgets.QDialogButtonBox.ActionRole);delete_btn=buttons.addButton('Delete',QtWidgets.QDialogButtonBox.DestructiveRole)
+        def selected_rec():
+            row=table.currentRow()
+            if row<0:return None
+            ident=str(table.item(row,0).data(QtCore.Qt.UserRole) or '')
+            return next((x for x in rows if str(x.get('id'))==ident),None)
+        def apply_selected():
+            rec=selected_rec()
+            if rec is None:return
+            if not rec.get('compatible'):
+                QtWidgets.QMessageBox.information(dlg,'Worksheet Template','That template scope does not match the active Run.');return
+            self._apply_worksheet_template_record(rec);dlg.accept()
+        def delete_selected():
+            rec=selected_rec()
+            if rec is None:return
+            if QtWidgets.QMessageBox.question(dlg,'Delete Worksheet Template',f"Delete {rec.get('name','this template')}?")==QtWidgets.QMessageBox.Yes:
+                delete_worksheet_template(str(rec.get('id') or ''));fill()
+        apply_btn.clicked.connect(apply_selected);delete_btn.clicked.connect(delete_selected);buttons.rejected.connect(dlg.reject);v.addWidget(buttons);dlg.exec()
+
+    def _compare_workspace_manager(self):
+        if not self.store.runs:
+            QtWidgets.QMessageBox.information(self,'Compare Workspace','Open at least one data log first.');return
+        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle('Compare Workspace Manager');dlg.resize(980,560)
+        v=QtWidgets.QVBoxLayout(dlg)
+        intro=QtWidgets.QLabel('Choose one Main Run and, when comparing, one Reference Run. Additional Runs may be overlays. Alignment offsets are display-only and never rewrite logger time.');intro.setWordWrap(True);v.addWidget(intro)
+        top=QtWidgets.QHBoxLayout();saved=QtWidgets.QComboBox();load_btn=QtWidgets.QPushButton('Load Saved Set');top.addWidget(QtWidgets.QLabel('Named Compare Set'));top.addWidget(saved,1);top.addWidget(load_btn);v.addLayout(top)
+        table=QtWidgets.QTableWidget(len(self.store.runs),5);table.setHorizontalHeaderLabels(['Session','Vendor','Role','Alignment (s)','Identity']);table.verticalHeader().setVisible(False);table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows);v.addWidget(table,1)
+        role_boxes=[];align_spins=[]
+        for row,h in enumerate(self.store.runs):
+            table.setItem(row,0,QtWidgets.QTableWidgetItem(h.label));table.setItem(row,1,QtWidgets.QTableWidgetItem(h.run.vendor or ''))
+            role=QtWidgets.QComboBox();role.addItem('Available','available');role.addItem('Main','main');role.addItem('Reference','reference');role.addItem('Overlay','overlay');idx=role.findData(h.role if h.role in ('available','main','reference','overlay') else 'available');role.setCurrentIndex(max(0,idx));table.setCellWidget(row,2,role);role_boxes.append(role)
+            spin=QtWidgets.QDoubleSpinBox();spin.setRange(-10.0,10.0);spin.setDecimals(5);spin.setSingleStep(0.01);spin.setValue(float(h.time_alignment_s));spin.setSuffix(' s');table.setCellWidget(row,3,spin);align_spins.append(spin)
+            table.setItem(row,4,QtWidgets.QTableWidgetItem(h.compare_key))
+        table.horizontalHeader().setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch);table.horizontalHeader().setSectionResizeMode(1,QtWidgets.QHeaderView.ResizeToContents);table.horizontalHeader().setSectionResizeMode(2,QtWidgets.QHeaderView.ResizeToContents);table.horizontalHeader().setSectionResizeMode(3,QtWidgets.QHeaderView.ResizeToContents);table.horizontalHeader().setSectionResizeMode(4,QtWidgets.QHeaderView.Stretch)
+        status=QtWidgets.QLabel('');status.setWordWrap(True);v.addWidget(status)
+        toolrow=QtWidgets.QHBoxLayout();auto_btn=QtWidgets.QPushButton('Auto-align compare Runs to Main');reset_btn=QtWidgets.QPushButton('Reset offsets');save_btn=QtWidgets.QPushButton('Save as Named Compare Set…');toolrow.addWidget(auto_btn);toolrow.addWidget(reset_btn);toolrow.addStretch(1);toolrow.addWidget(save_btn);v.addLayout(toolrow)
+        buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Apply|QtWidgets.QDialogButtonBox.Close);v.addWidget(buttons)
+
+        def refresh_saved():
+            saved.clear();saved.addItem('— current live workspace —','')
+            for cs in self.compare_sets.sets:saved.addItem(cs.name,cs.id)
+        refresh_saved()
+        if self.compare_sets.active:
+            i=saved.findData(self.compare_sets.active.id)
+            if i>=0:saved.setCurrentIndex(i)
+
+        def table_rows():
+            rows=[]
+            for i,h in enumerate(self.store.runs):
+                rows.append(CompareRun(h.compare_key,h.label,role_boxes[i].currentData()!='available',float(align_spins[i].value()),str(role_boxes[i].currentData())))
+            return rows
+
+        def validate_rows(rows):
+            active=[r for r in rows if r.enabled and r.role!='available']
+            mains=[r for r in active if r.role=='main'];refs=[r for r in active if r.role=='reference']
+            if len(mains)!=1:return False,'Choose exactly one Main Run.'
+            if len(active)>1 and len(refs)!=1:return False,'A comparison workspace needs exactly one Reference Run when more than one Run is displayed.'
+            return True,''
+
+        def apply_live(close=False):
+            rows=table_rows();ok,msg=validate_rows(rows)
+            if not ok:QtWidgets.QMessageBox.warning(dlg,'Compare Workspace',msg);return False
+            main_key=next(r.run_key for r in rows if r.enabled and r.role=='main')
+            for i,(h,row) in enumerate(zip(self.store.runs,rows)):
+                h.role=row.role if row.enabled else 'available';h.time_alignment_s=float(row.alignment_s)
+                if h.compare_key==main_key:self.store.active_index=i
+            self.store.changed.emit();self.store.activeChanged.emit(self.store.active)
+            comparing=sum(1 for r in rows if r.enabled and r.role in ('reference','overlay'))>0
+            self.compare_box.blockSignals(True);self.compare_box.setChecked(comparing);self.compare_box.blockSignals(False)
+            self._compare_changed(1 if comparing else 0)
+            self._refresh_session_selectors();status.setText('Applied live compare workspace. Source telemetry was not modified.')
+            if close:dlg.accept()
+            return True
+
+        def load_saved():
+            ident=str(saved.currentData() or '')
+            if not ident:return
+            cs=next((x for x in self.compare_sets.sets if x.id==ident),None)
+            if cs is None:return
+            by_key={r.run_key:r for r in cs.runs};missing=[]
+            for i,h in enumerate(self.store.runs):
+                rec=by_key.get(h.compare_key)
+                role_boxes[i].setCurrentIndex(max(0,role_boxes[i].findData(rec.role if rec and rec.enabled else 'available')))
+                align_spins[i].setValue(float(rec.alignment_s) if rec else 0.0)
+            loaded_keys={h.compare_key for h in self.store.runs}
+            missing=[r.label or r.run_key for r in cs.runs if r.enabled and r.run_key not in loaded_keys]
+            status.setText(f"Loaded {cs.name}." + (f" {len(missing)} saved Run(s) are not currently loaded: {', '.join(missing[:4])}" if missing else ''))
+
+        def auto_align():
+            rows=table_rows();ok,msg=validate_rows(rows)
+            if not ok:QtWidgets.QMessageBox.warning(dlg,'Auto Alignment',msg);return
+            main_i=next(i for i,r in enumerate(rows) if r.enabled and r.role=='main');main=self.store.runs[main_i]
+            results=[];failures=[]
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            try:
+                for i,row in enumerate(rows):
+                    if i==main_i or not row.enabled or row.role not in ('reference','overlay'):continue
+                    try:
+                        result=estimate_time_alignment(main.run,self.store.runs[i].run);align_spins[i].setValue(float(result.offset_s));results.append(f"{self.store.runs[i].label}: {result.offset_s:+.4f}s ({result.canonical}, r={result.score:.3f})")
+                    except Exception as exc:failures.append(f"{self.store.runs[i].label}: {exc}")
+            finally:QtWidgets.QApplication.restoreOverrideCursor()
+            status.setText('Auto alignment — ' + ('; '.join(results) if results else 'no Runs aligned') + ((' | Could not align: '+'; '.join(failures)) if failures else ''))
+
+        def save_named():
+            rows=table_rows();ok,msg=validate_rows(rows)
+            if not ok:QtWidgets.QMessageBox.warning(dlg,'Compare Workspace',msg);return
+            name,accepted=QtWidgets.QInputDialog.getText(dlg,'Save Compare Set','Compare Set name:',text=self.compare_sets.active.name if self.compare_sets.active else 'Compare Set 1')
+            if not accepted or not str(name).strip():return
+            name=str(name).strip();existing=next((x for x in self.compare_sets.sets if x.name.casefold()==name.casefold()),None);cs=existing or CompareSet(name);cs.name=name;cs.runs=[r for r in rows if r.enabled];cs.reference_run_key=next((r.run_key for r in cs.runs if r.role=='reference'),'')
+            if existing is None:self.compare_sets.sets.append(cs)
+            self.compare_sets.active_id=cs.id;refresh_saved();saved.setCurrentIndex(max(0,saved.findData(cs.id)));apply_live(False);status.setText(f'Saved Compare Set: {name}')
+
+        load_btn.clicked.connect(load_saved);auto_btn.clicked.connect(auto_align);reset_btn.clicked.connect(lambda:[spin.setValue(0.0) for spin in align_spins]);save_btn.clicked.connect(save_named);buttons.button(QtWidgets.QDialogButtonBox.Apply).clicked.connect(lambda:apply_live(False));buttons.rejected.connect(dlg.reject);dlg.exec()
 
     def _current_compare_rows(self) -> list[CompareRun]:
         rows=[]
@@ -4608,7 +4831,7 @@ class MainWindow(QtWidgets.QMainWindow):
             'Shift+click waveform — place reference cursor directly &nbsp;&nbsp; Ctrl+click — place cursor B<br><br>'
             '<b>Application</b><br>'
             'Ctrl+O — open log &nbsp;&nbsp; Ctrl+S — save workbook &nbsp;&nbsp; Ctrl+K — command palette<br>'
-            'Ctrl+P / Ctrl+Q — channel search / Quick Access &nbsp;&nbsp; Ctrl+M — Math Channel Builder &nbsp;&nbsp; Ctrl+Alt+M — Common Channel Mapping<br>Ctrl+Alt+D — Data Log Setup / Readiness &nbsp;&nbsp; Ctrl+I — inference center<br>'
+            'Ctrl+P / Ctrl+Q — channel search / Quick Access &nbsp;&nbsp; Ctrl+M — Math Channel Builder &nbsp;&nbsp; Ctrl+Alt+M — Common Channel Mapping<br>Ctrl+Alt+D — Data Log Setup / Readiness &nbsp;&nbsp; Ctrl+Alt+T — apply Worksheet Template &nbsp;&nbsp; Ctrl+Shift+R — Compare Workspace Manager<br>Ctrl+I — inference center<br>'
             'Ctrl+Shift+P — Pro Stock shift report &nbsp;&nbsp; Ctrl+Shift+R — Ref-to-Cursor statistics display<br>'
             'Ctrl+Alt+Left / Right — step Compare reference Run &nbsp;&nbsp; Ctrl+Enter — focus/restore analysis workspace<br><br>'
             'Additional McLaren-style bindings will be added deliberately as their exact behavior is verified; the application will not silently assign familiar keys to different actions.'

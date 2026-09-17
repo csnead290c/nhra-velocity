@@ -1,5 +1,15 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.20 — Compare Workspace + Portable Worksheet Templates
+
+- Added **Compare Workspace Manager…** (`Ctrl+Shift+R`) as one place to assign Main / Reference / Overlay / Available roles, edit display-only time alignment, auto-align comparison Runs to Main, load existing Compare Sets, and save the live setup as a named Compare Set. Validation requires exactly one Main Run and one Reference whenever multiple Runs are displayed.
+- Added portable **Worksheet Templates** with save/apply/manage workflows (`Ctrl+Alt+T` to apply). Templates store Common Channel identities when a plotted parameter is explicitly mapped, so a layout built from RacePak `ENGINE RPM` can resolve to a different explicitly mapped Engine Speed source on another logger. Unmapped raw source channels remain exact references and are never fuzzy matched.
+- Worksheet templates may be scoped explicitly to **All vehicles/categories**, **Category**, or **Vehicle + Category**. Applying a template outside its scope is blocked; unavailable exact/common references are reported rather than silently substituted.
+- Templates capture dock/display structure, waveform properties, statistics options, trace styles, and the worksheet X-axis mode. Existing workbook persistence remains unchanged.
+- Added **Grouped Channels** waveform mode and a per-trace **Axis group** property. Traces share a band only when the engineer gives them the same group name and they also have the same display unit; incompatible units cannot be silently forced onto one scale.
+- Existing `Stacked Channels`, `Stacked Units`, and `Overlay` behavior is preserved. Axis-group metadata is ordinary worksheet display state and is included in portable templates/workbooks.
+- Daily-workflow regression coverage now tests portable Common Channel resolution across differently named data sets, exact raw-channel failure behavior, contextual template scoping, and the Compare/Template/Grouped-Axis desktop contracts.
+
 ## v0.38.0-dev.19 — macOS Portability Guardrails
 
 - Added `MACOS_PLAN.md` with a staged first-class macOS path: portability guardrails, real-hardware engineering beta, Developer ID/notarized distribution, cross-platform updater, and vendor-bridge classification. The intent is one analysis engine/workbook format rather than a Mac fork.

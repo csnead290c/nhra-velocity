@@ -10,6 +10,7 @@ source-channel name. Project-local trace styling still overrides these values.
 from pathlib import Path
 from typing import Any, Dict, Optional
 import re
+import uuid
 
 from .diagnostics import app_data_root
 from .project_io import atomic_write_json, read_project_json
@@ -33,7 +34,7 @@ def _safe_load(path: Optional[Path]=None) -> dict:
     if _CACHE_PATH==p and _CACHE_MTIME_NS==mtime and _CACHE_OBJECT is not None:
         return dict(_CACHE_OBJECT)
     if not p.exists():
-        obj={'version':3,'channels':{},'common_channel_mappings':{},'common_channel_profiles':{},'math_templates':{}}
+        obj={'version':4,'channels':{},'common_channel_mappings':{},'common_channel_profiles':{},'math_templates':{},'worksheet_templates':{}}
     else:
         try:
             obj=read_project_json(p)
@@ -41,9 +42,10 @@ def _safe_load(path: Optional[Path]=None) -> dict:
             if not isinstance(obj.get('common_channel_mappings',{}),dict): obj['common_channel_mappings']={}
             if not isinstance(obj.get('common_channel_profiles',{}),dict): obj['common_channel_profiles']={}
             if not isinstance(obj.get('math_templates',{}),dict): obj['math_templates']={}
-            obj['version']=max(3,int(obj.get('version',1) or 1))
+            if not isinstance(obj.get('worksheet_templates',{}),dict): obj['worksheet_templates']={}
+            obj['version']=max(4,int(obj.get('version',1) or 1))
         except Exception:
-            obj={'version':3,'channels':{},'common_channel_mappings':{},'common_channel_profiles':{},'math_templates':{}}
+            obj={'version':4,'channels':{},'common_channel_mappings':{},'common_channel_profiles':{},'math_templates':{},'worksheet_templates':{}}
     _CACHE_PATH=p; _CACHE_MTIME_NS=mtime; _CACHE_OBJECT=dict(obj)
     return dict(obj)
 
@@ -217,7 +219,7 @@ def save_common_channel_profile(
         'label': _profile_label(run, scope),
         'mappings': clean,
     }
-    obj['version'] = max(3, int(obj.get('version',1) or 1))
+    obj['version'] = max(4, int(obj.get('version',1) or 1))
     atomic_write_json(p,obj); _invalidate_cache(); return p
 
 
@@ -346,3 +348,85 @@ def delete_math_channel_template(name: str, *, path: Optional[Path]=None) -> boo
     p=path or preferences_path(); obj=_safe_load(p); raw=obj.get('math_templates',{})
     if not isinstance(raw,dict) or name not in raw:return False
     del raw[name]; atomic_write_json(p,obj); _invalidate_cache(); return True
+
+
+# ---- Portable worksheet templates ----------------------------------------
+
+def _worksheet_template_context(run: Optional[TelemetryRun]) -> Dict[str,str]:
+    if run is None:
+        return {'category':'','vehicle_id':'','vehicle_name':'','car_number':''}
+    md=run.metadata if isinstance(run.metadata,dict) else {}
+    return {
+        'category': _context_token(md.get('catalog_category') or md.get('official_category') or md.get('category')),
+        'vehicle_id': _context_token(md.get('catalog_vehicle_id')),
+        'vehicle_name': _context_token(md.get('catalog_vehicle_name') or md.get('vehicle_name')),
+        'car_number': _context_token(md.get('catalog_car_number') or md.get('car_number')),
+    }
+
+
+def worksheet_template_scope_options(run: Optional[TelemetryRun]) -> list[tuple[str,str]]:
+    out=[('global','All vehicles / categories')]
+    c=_worksheet_template_context(run)
+    if c['category']:
+        out.append(('category',f"Category — {c['category']}"))
+        if c['vehicle_id'] or c['car_number'] or c['vehicle_name']:
+            vehicle=c['vehicle_name'] or (f"#{c['car_number']}" if c['car_number'] else c['vehicle_id'])
+            out.append(('vehicle_category',f"Vehicle + Category — {vehicle} / {c['category']}"))
+    return out
+
+
+def _worksheet_template_matches(rec: Dict[str,Any], run: Optional[TelemetryRun]) -> bool:
+    scope=str(rec.get('scope') or 'global')
+    if scope=='global': return True
+    c=_worksheet_template_context(run); saved=rec.get('context',{}) if isinstance(rec.get('context',{}),dict) else {}
+    if not c['category'] or _context_token(saved.get('category'))!=c['category']:
+        return False
+    if scope=='category': return True
+    if scope!='vehicle_category': return False
+    saved_identity=_context_token(saved.get('vehicle_id') or saved.get('car_number') or saved.get('vehicle_name'))
+    current_identity=c['vehicle_id'] or c['car_number'] or c['vehicle_name']
+    return bool(saved_identity and current_identity and saved_identity==current_identity)
+
+
+def worksheet_templates(*, run: Optional[TelemetryRun]=None, compatible_only: bool=False, path: Optional[Path]=None) -> list[Dict[str,Any]]:
+    obj=_safe_load(path); raw=obj.get('worksheet_templates',{})
+    if not isinstance(raw,dict): return []
+    out=[]
+    for key,rec in raw.items():
+        if not isinstance(rec,dict): continue
+        row=dict(rec); row['id']=str(key)
+        row['compatible']=_worksheet_template_matches(row,run)
+        if compatible_only and not row['compatible']: continue
+        out.append(row)
+    rank={'vehicle_category':0,'category':1,'global':2}
+    out.sort(key=lambda r:(rank.get(str(r.get('scope')),9),str(r.get('name','')).casefold()))
+    return out
+
+
+def save_worksheet_template(name: str, payload: Dict[str,Any], *, run: Optional[TelemetryRun]=None, scope: str='global', path: Optional[Path]=None) -> str:
+    name=str(name or '').strip(); scope=str(scope or 'global')
+    if not name: raise ValueError('Worksheet template name is required.')
+    if scope not in ('global','category','vehicle_category'): raise ValueError(f'Unsupported worksheet template scope: {scope!r}')
+    context=_worksheet_template_context(run)
+    if scope in ('category','vehicle_category') and not context['category']:
+        raise ValueError('A category-scoped worksheet template requires authoritative category context.')
+    if scope=='vehicle_category' and not (context['vehicle_id'] or context['car_number'] or context['vehicle_name']):
+        raise ValueError('Vehicle + Category worksheet template requires authoritative vehicle identity.')
+    p=path or preferences_path(); obj=_safe_load(p); raw=obj.setdefault('worksheet_templates',{})
+    existing=''
+    for key,rec in raw.items():
+        if not isinstance(rec,dict): continue
+        if str(rec.get('name','')).casefold()!=name.casefold() or str(rec.get('scope','global'))!=scope: continue
+        saved=rec.get('context',{}) if isinstance(rec.get('context',{}),dict) else {}
+        if scope=='global' or saved==context:
+            existing=str(key); break
+    ident=existing or str(uuid.uuid4())
+    raw[ident]={'name':name,'scope':scope,'context':context,'payload':dict(payload or {})}
+    obj['version']=max(4,int(obj.get('version',1) or 1)); atomic_write_json(p,obj); _invalidate_cache(); return ident
+
+
+def delete_worksheet_template(template_id: str, *, path: Optional[Path]=None) -> bool:
+    p=path or preferences_path(); obj=_safe_load(p); raw=obj.get('worksheet_templates',{})
+    key=str(template_id or '')
+    if not isinstance(raw,dict) or key not in raw: return False
+    del raw[key]; atomic_write_json(p,obj); _invalidate_cache(); return True

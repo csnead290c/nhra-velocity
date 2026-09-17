@@ -176,3 +176,15 @@ def test_all_daily_analysis_displays_construct_with_realistic_context():
     # Construction should not mutate the authoritative source sessions.
     assert store.active is h1
     assert h2.role == "reference"
+
+
+def test_grouped_channels_share_only_explicit_same_unit_axis():
+    app=_app();store=SessionStore();cursors=CursorBus();run=_run('grouped')
+    store.add('grouped.csv',run,activate=True)
+    wave=WaveformDisplay(store,cursors);wave.channels=['RPM','Driveshaft','Speed']
+    wave.channel_styles['RPM']={'axis_group':'Rotational Speed'}
+    wave.channel_styles['Driveshaft']={'axis_group':'Rotational Speed'}
+    wave.channel_styles['Speed']={'axis_group':'Rotational Speed'}  # same name, incompatible unit => separate band
+    wave.layout_mode.setCurrentText('Grouped Channels');wave.refresh();app.processEvents()
+    assert len(wave._plots)==2
+    assert any(set(chans)=={'RPM','Driveshaft'} for _plot,_header,chans in wave._plot_headers)

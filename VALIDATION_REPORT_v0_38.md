@@ -120,3 +120,13 @@ The earlier persistence regression only proved that the Run→Asset row and mana
 - Dedicated macOS workflow builds the real PyInstaller `.app` bundle and runs the same network-free `--smoke-test` used by packaged Windows validation.
 - Added platform-contract regression coverage for stable platform ids, macOS Keychain/app-bundle capability reporting, Windows installer preservation, and `~/Library/Application Support/NHRA Velocity` app-data behavior.
 - macOS packaging includes the production VELOCITY iconset and bundle id `com.nhra.velocity`. Development artifacts remain explicitly unsigned until Developer ID/notarization gates exist.
+
+
+## dev.20 Compare / template / grouped-axis validation
+
+- Full automated suite: **283 passed, 1 Qt-only test skipped** in the Linux packaging environment before final version/documentation-only edits.
+- Portable worksheet-template regression proves mapped Common Channels resolve across differently named logger sources while unmapped raw source references require an exact match and surface missing inputs instead of guessing.
+- Template scope regression verifies Vehicle+Category is more specific than Category, Category does not leak across classes, and global templates remain explicit user-selected reusable layouts rather than automatic behavior.
+- Compare Workspace Manager keeps alignment as display-only state and validates one Main plus one Reference for an active multi-Run comparison. Existing Compare Set serialization remains the persistence layer.
+- Grouped Channels shares a plot band only for the same explicit axis-group name and exact display unit; this prevents accidental mixed-unit axes.
+- `python -m compileall -q desktop.py runlab tests` passed.
