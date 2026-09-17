@@ -11,6 +11,8 @@ parameters are application-level resources shared by all displays.
 import json
 import html
 import os
+import copy
+import re
 import sys
 import logging
 import traceback
@@ -46,13 +48,13 @@ except ImportError as exc:  # pragma: no cover - environment dependent
 
 from runlab.branding import PRODUCT_NAME, PRODUCT_VERSION
 from runlab.product_manifest import WORKBOOK_FORMAT_VERSION
-from runlab.importers import load_telemetry, apply_channel_overrides, CANONICAL_CHANNELS, telemetry_file_candidate
+from runlab.importers import load_telemetry, apply_channel_overrides, auto_map_channels, CANONICAL_CHANNELS, telemetry_file_candidate
 from runlab.models import TelemetryRun, Environment, TimingData
 from runlab.telemetry import detect_drag_pass_window, launch_time_override, set_launch_time_override, clear_launch_time_override
 from runlab.audit import audit_run
 from runlab.alignment import estimate_time_alignment
-from runlab.math_channels import add_math_channel, reapply_math_channels
-from runlab.units import display_label, dimension, normalize_unit, convert_value, UNITS
+from runlab.math_channels import add_math_channel, reapply_math_channels, evaluate_run_expression, infer_expression_dimension
+from runlab.units import display_label, dimension, normalize_unit, convert_value, compatible, UNITS
 from runlab.knowledge import vehicle_from_run, vehicle_inputs, set_vehicle_input, set_parameter, restore_knowledge_snapshot
 from runlab.reconstruction import reconstruct_delivered_power
 from runlab.inverse import FitRun, FitEvidencePolicy, FitDistanceWindow, fit_vehicle
@@ -73,7 +75,11 @@ from runlab.annotations import annotations_for_mode, add_bookmark, add_region, d
 from runlab.statistics import region_statistics
 from runlab.signal_analysis import fft_spectrum, filter_signal, power_spectral_density, spectrogram
 from runlab.envelope import multi_run_envelope
-from runlab.preferences import get_channel_preference, set_channel_preference, clear_channel_preference
+from runlab.preferences import (
+    get_channel_preference, set_channel_preference, clear_channel_preference,
+    learned_common_channel_overrides, learned_mapping_for_source, remember_common_channel_mapping, forget_common_channel_mapping,
+    math_channel_templates, save_math_channel_template, delete_math_channel_template,
+)
 from runlab.sensor_health import sensor_health
 from runlab.comparison_report import comparison_summary
 from runlab.derived import attach_delivered_power_reconstruction
@@ -88,6 +94,7 @@ from runlab.time_mapping import TimeAnchor, fit_time_mapping
 from runlab.case_timeline import CaseTimeAnchor, fit_case_run_alignment, store_case_run_alignment, composed_mapping_for_asset
 from runlab.case_playback import CasePlaybackController, case_playback_frame, sample_telemetry_at_asset_time
 from runlab.workstation import channel_catalog, set_channel_alias, gates, GateDefinition, save_gate, evaluate_gate, MetricDefinition, drag_metric_report
+from runlab.common_channels import common_channel_specs, common_channel_label
 from runlab.heatmap import binned_map
 from runlab.display_analysis import paired_channel_data, linear_regression, channel_distribution, sample_channel_at
 from runlab.definition_library import (
@@ -254,9 +261,16 @@ class SessionStore(QtCore.QObject):
             return self.runs[self.active_index]
         return None
 
-    def add(self, path: str, run: TelemetryRun, *, activate: bool = False) -> RunHandle:
+    def add(self, path: str, run: TelemetryRun, *, activate: bool = False, apply_preferences: bool = True) -> RunHandle:
+        # Apply vendor-scoped common-channel mappings that the engineer has
+        # explicitly taught Velocity on earlier data sets. Automatic importer
+        # mappings still exist underneath; learned mappings win only when their
+        # exact source channel is present and dimensionally safe.
+        learned = learned_common_channel_overrides(run) if apply_preferences else {}
+        if learned:
+            run = apply_channel_overrides(run, learned, {})
         first = not self.runs
-        h = RunHandle(str(path), run, "main" if first else "available", display_name=Path(path).stem)
+        h = RunHandle(str(path), run, "main" if first else "available", display_name=Path(path).stem, channel_overrides=dict(learned))
         self.runs.append(h)
         if first:
             self.active_index = 0
@@ -1095,13 +1109,15 @@ class ChannelTree(QtWidgets.QTreeWidget):
     channelActivated = QtCore.Signal(str)
     channelPropertiesRequested = QtCore.Signal(str)
     channelAliasRequested = QtCore.Signal(str)
+    commonChannelRequested = QtCore.Signal(str)
     channelFavoriteRequested = QtCore.Signal(str, bool)
+    calculatedChannelEditRequested = QtCore.Signal(str)
     calculatedChannelDeleteRequested = QtCore.Signal(str)
     channelRemoveRequested = QtCore.Signal(str)
 
     def __init__(self):
         super().__init__()
-        self.setHeaderLabels(["Parameter", "Alias", "Unit", "Hz", "Role", "Source"])
+        self.setHeaderLabels(["Parameter", "Alias", "Unit", "Hz", "Common Channel", "Source"])
         self.setColumnWidth(0, 220); self.setColumnWidth(1, 120); self.setColumnWidth(2, 65)
         self.setColumnWidth(3, 55); self.setColumnWidth(4, 105); self.setColumnWidth(5, 85)
         self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
@@ -1138,13 +1154,14 @@ class ChannelTree(QtWidgets.QTreeWidget):
             elif rec.name in essential:
                 group_name=f'Standard — {p.label}'
             else:
-                group_name='Calculated' if rec.source_kind=='calculated' else labels.get(rec.dimension,'Other')
+                group_name='Math Channels' if rec.source_kind=='calculated' else labels.get(rec.dimension,'Other')
             parent=groups.get(group_name)
             if parent is None:
                 parent=QtWidgets.QTreeWidgetItem([group_name]); parent.setFlags(parent.flags() & ~QtCore.Qt.ItemIsDragEnabled)
                 font=parent.font(0); font.setBold(True); parent.setFont(0,font); self.addTopLevelItem(parent); groups[group_name]=parent
             rate=f"{rec.sample_rate_hz:g}" if rec.sample_rate_hz else ''
-            item=QtWidgets.QTreeWidgetItem([rec.name,rec.alias,display_label(rec.unit),rate,rec.canonical_role,rec.source_kind.capitalize()])
+            common = common_channel_label(rec.canonical_role) if rec.canonical_role else ''
+            source_label='Math' if rec.source_kind=='calculated' else rec.source_kind.capitalize(); item=QtWidgets.QTreeWidgetItem([rec.name,rec.alias,display_label(rec.unit),rate,common,source_label])
             item.setData(0,QtCore.Qt.UserRole,rec.name); parent.addChild(item)
         for priority in (f'Standard — {p.label}','★ Favorites'):
             parent=groups.get(priority)
@@ -1168,19 +1185,22 @@ class ChannelTree(QtWidgets.QTreeWidget):
         if not item:return
         name=item.data(0,QtCore.Qt.UserRole)
         if not name:return
-        menu=QtWidgets.QMenu(self); props=menu.addAction("Channel Properties…"); alias=menu.addAction("Set Alias…"); add=menu.addAction("Add to active waveform"); remove=menu.addAction("Remove from active waveform")
+        menu=QtWidgets.QMenu(self); props=menu.addAction("Channel Properties…"); common=menu.addAction("Assign Common Channel…"); alias=menu.addAction("Set Display Alias…"); add=menu.addAction("Add to active waveform"); remove=menu.addAction("Remove from active waveform")
         pref=get_channel_preference(self._run,str(name)) if self._run is not None else {}
         favorite=bool(pref.get('favorite',False))
         fav_action=menu.addAction('Remove from Favorites' if favorite else 'Add to Favorites')
         math_names={str(d.get('name','')) for d in (self._run.metadata.get('math_channels',[]) if self._run else []) if isinstance(d,dict)}
-        delete_math=None
-        if str(name) in math_names: menu.addSeparator(); delete_math=menu.addAction("Delete calculated channel")
+        edit_math=None;delete_math=None
+        if str(name) in math_names:
+            menu.addSeparator();edit_math=menu.addAction("Edit math channel…"); delete_math=menu.addAction("Delete math channel")
         chosen=menu.exec(self.viewport().mapToGlobal(pos))
         if chosen==props:self.channelPropertiesRequested.emit(str(name))
+        elif chosen==common:self.commonChannelRequested.emit(str(name))
         elif chosen==alias:self.channelAliasRequested.emit(str(name))
         elif chosen==add:self.channelActivated.emit(str(name))
         elif chosen==remove:self.channelRemoveRequested.emit(str(name))
         elif chosen==fav_action:self.channelFavoriteRequested.emit(str(name),not favorite)
+        elif edit_math is not None and chosen==edit_math:self.calculatedChannelEditRequested.emit(str(name))
         elif delete_math is not None and chosen==delete_math:self.calculatedChannelDeleteRequested.emit(str(name))
 
 
@@ -1652,7 +1672,13 @@ class WaveformDisplay(QtWidgets.QWidget):
                 color = self._style_for(channel, self.channels.index(channel) if channel in self.channels else 0).get('color', '#dddddd')
                 unit = display_label(self._display_unit(channel, handle.run))
                 current_text = self._fmt_cursor_value(current)
-                name = html.escape(str(channel))
+                aliases = handle.run.metadata.get('channel_aliases',{}) if isinstance(handle.run.metadata.get('channel_aliases',{}),dict) else {}
+                display_name=str(aliases.get(channel,'') or '')
+                if not display_name:
+                    originals=handle.run.metadata.get('original_channel_map',{}) if isinstance(handle.run.metadata.get('original_channel_map',{}),dict) else {}
+                    canonical=next((role for role,source in originals.items() if str(source)==str(channel)), '')
+                    display_name=common_channel_label(canonical) if canonical else str(channel)
+                name = html.escape(display_name)
                 unit_text = f" {html.escape(str(unit))}" if unit else ""
                 chunk = (
                     f"<span style='color:{color};font-weight:600'>{name}</span>"
@@ -4005,7 +4031,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.a_saved_report=QtGui.QAction('Saved Analysis Report Display',self); self.a_saved_report.triggered.connect(lambda:self.current_sheet().add_saved_report())
         self.a_saved_trend=QtGui.QAction('Saved KPI Trend Display',self); self.a_saved_trend.triggered.connect(lambda:self.current_sheet().add_saved_trend())
         self.a_strip_model=QtGui.QAction('NHRA Strip / Model Residuals',self); self.a_strip_model.triggered.connect(lambda:self.current_sheet().add_strip_model())
-        self.a_math=QtGui.QAction('Calculated Channel…',self); self.a_math.setShortcut('Ctrl+M'); self.a_math.triggered.connect(self._new_math_channel)
+        self.a_common_channels=QtGui.QAction('Common Channel Mapping…',self); self.a_common_channels.setShortcut('Ctrl+Alt+M'); self.a_common_channels.triggered.connect(self._common_channel_mapping_dialog)
+        self.a_math=QtGui.QAction('Math Channel Builder…',self); self.a_math.setShortcut('Ctrl+M'); self.a_math.triggered.connect(self._new_math_channel)
         self.a_reconstruct=QtGui.QAction('Reconstruct Delivered Power…',self); self.a_reconstruct.triggered.connect(self._reconstruct_power)
         self.a_infer=QtGui.QAction('Inference Center…',self); self.a_infer.setShortcut('Ctrl+I'); self.a_infer.triggered.connect(self._inference_center)
         self.a_compare_run=QtGui.QAction('Create Compare Run…',self); self.a_compare_run.setShortcut('Ctrl+Shift+C'); self.a_compare_run.triggered.connect(self._create_compare_run)
@@ -4069,7 +4096,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.channel_search=QtWidgets.QLineEdit(); self.channel_search.setPlaceholderText('Search channels…  (Ctrl+P)')
         filter_row.addWidget(self.channel_scope);filter_row.addWidget(self.channel_search,1);v.addLayout(filter_row)
         self.search_shortcut=QtGui.QShortcut(QtGui.QKeySequence('Ctrl+P'), self); self.search_shortcut.activated.connect(self._focus_parameter_search); self.quick_access_shortcut=QtGui.QShortcut(QtGui.QKeySequence('Ctrl+Q'),self); self.quick_access_shortcut.activated.connect(self._focus_parameter_search)
-        self.channels=ChannelTree(); self.channels.channelActivated.connect(self._channel_add); self.channels.channelRemoveRequested.connect(self._channel_remove); self.channels.channelPropertiesRequested.connect(self._channel_properties); self.channels.channelAliasRequested.connect(self._set_channel_alias); self.channels.channelFavoriteRequested.connect(self._set_channel_favorite); self.channels.calculatedChannelDeleteRequested.connect(self._delete_math_channel); v.addWidget(self.channels,1)
+        self.channels=ChannelTree(); self.channels.channelActivated.connect(self._channel_add); self.channels.channelRemoveRequested.connect(self._channel_remove); self.channels.channelPropertiesRequested.connect(self._channel_properties); self.channels.commonChannelRequested.connect(self._assign_common_channel); self.channels.channelAliasRequested.connect(self._set_channel_alias); self.channels.channelFavoriteRequested.connect(self._set_channel_favorite); self.channels.calculatedChannelEditRequested.connect(self._edit_math_channel); self.channels.calculatedChannelDeleteRequested.connect(self._delete_math_channel); v.addWidget(self.channels,1)
         self.channel_search.textChanged.connect(lambda _t:self._refresh_channel_explorer());self.channel_scope.currentIndexChanged.connect(lambda _i:self._refresh_channel_explorer())
         params_dock=QtWidgets.QDockWidget('Channel Explorer',self); params_dock.setObjectName('ParametersDock'); params_dock.setWidget(chwrap); self.addDockWidget(QtCore.Qt.LeftDockWidgetArea,params_dock)
         # Run selection and channel selection are the two ordinary entry points;
@@ -4143,7 +4170,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for preset in QUICK_GRAPH_PRESETS:
             qg.addAction(preset, lambda checked=False, name=preset: self._apply_quick_graph(name))
         add=m.addMenu('Add Display'); add.addAction(self.a_wave); add.addAction(self.a_values); add.addAction(self.a_gauge); add.addAction(self.a_region_stats); add.addAction(self.a_scatter); add.addAction(self.a_hist); add.addAction(self.a_spectrum); add.addAction(self.a_load_map); add.addAction(self.a_metric_report); add.addAction(self.a_saved_report); add.addAction(self.a_saved_trend); add.addAction(self.a_strip_model); add.addAction(self.a_envelope); add.addAction(self.a_delta); add.addAction(self.a_comparison_summary); add.addAction(self.a_events); add.addAction(self.a_alarm_status); add.addAction(self.a_notepad); add.addAction(self.a_audit); add.addAction(self.a_sensor_health); add.addAction(self.a_knowledge)
-        m=self.menuBar().addMenu('&Data'); m.addAction('Run Details / Setup…',lambda:self.metadata.setFocus()); m.addAction(self.a_math); m.addAction(self.a_gate); libm=m.addMenu('Analysis Definition Library'); [libm.addAction(a) for a in (self.a_library_import,self.a_library_export,self.a_library_capture,self.a_library_constant,self.a_library_metric,self.a_library_segment,self.a_library_condition,self.a_library_event_rule,self.a_library_report)]; m.addSeparator(); m.addAction(self.a_site_sync); m.addAction(self.a_attach_selected_run); m.addAction(self.a_keep_offline); m.addAction(self.a_capture_snapshot); m.addAction(self.a_history); m.addSeparator(); m.addAction(self.a_apply_sync)
+        m=self.menuBar().addMenu('&Data'); m.addAction('Run Details / Setup…',lambda:self.metadata.setFocus()); m.addAction(self.a_common_channels); m.addAction(self.a_math); m.addAction(self.a_gate); libm=m.addMenu('Analysis Definition Library'); [libm.addAction(a) for a in (self.a_library_import,self.a_library_export,self.a_library_capture,self.a_library_constant,self.a_library_metric,self.a_library_segment,self.a_library_condition,self.a_library_event_rule,self.a_library_report)]; m.addSeparator(); m.addAction(self.a_site_sync); m.addAction(self.a_attach_selected_run); m.addAction(self.a_keep_offline); m.addAction(self.a_capture_snapshot); m.addAction(self.a_history); m.addSeparator(); m.addAction(self.a_apply_sync)
         m.addAction('Data Integrity Audit…',self._show_audit); m.addAction(self.a_sensor_health)
         m=self.menuBar().addMenu('&Analysis')
         quick=m.addMenu('Quick Analysis')
@@ -4185,7 +4212,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ('Add Scatter',lambda:self.current_sheet().add_scatter()),('Add Histogram',lambda:self.current_sheet().add_histogram()),
             ('Add FFT / PSD Spectrum',lambda:self.current_sheet().add_spectrum()),('Add Load / Heat Map',lambda:self.current_sheet().add_load_map()),('Add Segment / KPI Report',lambda:self.current_sheet().add_metric_report()),('Add NHRA Strip / Model Residuals',lambda:self.current_sheet().add_strip_model()),('Add Multi-Run Envelope',lambda:self.current_sheet().add_envelope()),
             ('Add Reference Delta',lambda:self.current_sheet().add_delta()),('Add Run Comparison Summary',lambda:self.current_sheet().add_comparison_summary()),('Add Alarm Status',lambda:self.current_sheet().add_alarm_status()),('Add Cursor Region Statistics',lambda:self.current_sheet().add_region_stats()),('Add Sensor Health',lambda:self.current_sheet().add_sensor_health()),
-            ('Pro Stock Shift Report…',self._pro_stock_shift_report),('Calculated Channel…',self._new_math_channel),('Data Gate…',self._new_data_gate),('Reconstruct Delivered Power…',self._reconstruct_power),
+            ('Pro Stock Shift Report…',self._pro_stock_shift_report),('Common Channel Mapping…',self._common_channel_mapping_dialog),('Math Channel Builder…',self._new_math_channel),('Data Gate…',self._new_data_gate),('Reconstruct Delivered Power…',self._reconstruct_power),
             ('Inference Center…',self._inference_center),('Create Compare Run…',self._create_compare_run),('Save Current Compare Set…',self._save_current_compare_set),('Apply Named Compare Set…',self._apply_named_compare_set),('Next Reference Run',lambda:self._step_compare_reference(1)),('Previous Reference Run',lambda:self._step_compare_reference(-1)),('Simulation Study Center…',self._simulation_study_center),('Capture Vehicle Model Snapshot…',self._capture_model_snapshot),('Engineering History…',self._engineering_history),('Sync NHRA Tech Services Data…',self._sync_tech_services_data),('Attach Data Log to Selected Run…',self._attach_local_telemetry_to_selected_run),('Keep Active Asset Offline',self._keep_active_offline),
             ('Run Import / Plot Data Self-Test…',self._run_data_selftest),('Open Diagnostic Log Folder',self._open_log_folder),
         ]
@@ -4547,7 +4574,7 @@ class MainWindow(QtWidgets.QMainWindow):
             'Shift+click waveform — place reference cursor directly &nbsp;&nbsp; Ctrl+click — place cursor B<br><br>'
             '<b>Application</b><br>'
             'Ctrl+O — open log &nbsp;&nbsp; Ctrl+S — save workbook &nbsp;&nbsp; Ctrl+K — command palette<br>'
-            'Ctrl+P / Ctrl+Q — channel search / Quick Access &nbsp;&nbsp; Ctrl+M — calculated channel &nbsp;&nbsp; Ctrl+I — inference center<br>'
+            'Ctrl+P / Ctrl+Q — channel search / Quick Access &nbsp;&nbsp; Ctrl+M — Math Channel Builder &nbsp;&nbsp; Ctrl+Alt+M — Common Channel Mapping<br>Ctrl+I — inference center<br>'
             'Ctrl+Shift+P — Pro Stock shift report &nbsp;&nbsp; Ctrl+Shift+R — A-B statistics display<br>'
             'Ctrl+Alt+Left / Right — step Compare reference Run &nbsp;&nbsp; Ctrl+Enter — focus/restore analysis workspace<br><br>'
             'Additional McLaren-style bindings will be added deliberately as their exact behavior is verified; the application will not silently assign familiar keys to different actions.'
@@ -4608,7 +4635,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if src and src not in channels:
                 channels.append(src)
         if not channels:
-            QtWidgets.QMessageBox.information(self, 'Quick Graph', f'No mapped channels for {name}. Assign canonical roles in Channel Properties first.')
+            QtWidgets.QMessageBox.information(self, 'Quick Graph', f'No mapped channels for {name}. Assign Common Channels in Data → Common Channel Mapping first.')
             return
         ws = self.current_sheet()
         if not ws.waveforms:
@@ -4631,22 +4658,150 @@ class MainWindow(QtWidgets.QMainWindow):
         self._refresh_channel_explorer()
         self.statusBar().showMessage(('Added to' if enabled else 'Removed from')+f' Favorites: {channel}',3000)
 
+    def _assign_common_channel(self, channel):
+        h=self.store.active
+        if not h:return
+        run=h.run
+        original=run.metadata.get('original_channel_map',{}) if isinstance(run.metadata.get('original_channel_map',{}),dict) else {}
+        current=next((role for role,source in original.items() if str(source)==str(channel)), '')
+        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle(f'Assign Common Channel — {channel}');dlg.resize(520,210)
+        form=QtWidgets.QFormLayout(dlg)
+        form.addRow('Source channel',QtWidgets.QLabel(str(channel)))
+        role=QtWidgets.QComboBox();role.addItem('(not assigned)','')
+        for spec in common_channel_specs():
+            suffix=f' [{spec.unit_label}]' if spec.unit_label else ''
+            role.addItem(f'{spec.label}{suffix}',spec.key)
+        idx=role.findData(current);role.setCurrentIndex(idx if idx>=0 else 0)
+        form.addRow('Common channel',role)
+        remember=QtWidgets.QCheckBox(f'Remember this mapping for future {run.vendor or "same-vendor"} data logs with this source-channel name')
+        remember.setChecked(bool(current and learned_mapping_for_source(run,channel)==current))
+        form.addRow(remember)
+        note=QtWidgets.QLabel('Common channels are stable engineering roles used by Quick Graphs, comparisons, RSA tools, reports and portable math formulas. Display Alias is separate and only changes what you see on screen.')
+        note.setWordWrap(True);form.addRow(note)
+        buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel);buttons.accepted.connect(dlg.accept);buttons.rejected.connect(dlg.reject);form.addRow(buttons)
+        if dlg.exec()!=QtWidgets.QDialog.Accepted:return
+        chosen=str(role.currentData() or '')
+        try:
+            if chosen:
+                target=next((spec.unit for spec in common_channel_specs() if spec.key==chosen),'')
+                source_unit=normalize_unit(run.units.get(channel,''))
+                if target and source_unit and not compatible(source_unit,target):
+                    raise ValueError(f'{channel} is {display_label(source_unit) or source_unit}; {common_channel_label(chosen)} expects {display_label(target) or target}.')
+            if current and current!=chosen:
+                h.channel_overrides[current]=''
+            if chosen:
+                h.channel_overrides[chosen]=str(channel)
+            elif current:
+                h.channel_overrides[current]=''
+            h.run=apply_channel_overrides(h.run,h.channel_overrides,h.unit_overrides)
+            if h.run.metadata.get('math_channels'):reapply_math_channels(h.run,list(h.run.metadata.get('math_channels',[])))
+            if remember.isChecked() and chosen:
+                remember_common_channel_mapping(h.run,str(channel),chosen)
+            elif current and learned_mapping_for_source(h.run,str(channel)):
+                forget_common_channel_mapping(h.run,str(channel))
+            self.store.changed.emit();self.store.activeChanged.emit(h)
+            self.statusBar().showMessage(f'{channel} → {common_channel_label(chosen) if chosen else "unassigned"}',5000)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self,'Common Channel Mapping',str(exc))
+
+    def _common_channel_mapping_dialog(self):
+        h=self.store.active
+        if not h:
+            QtWidgets.QMessageBox.information(self,'Common Channel Mapping','Open a data log first.');return
+        run=h.run
+        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle(f'Common Channel Mapping — {h.label}');dlg.resize(900,680)
+        lay=QtWidgets.QVBoxLayout(dlg)
+        intro=QtWidgets.QLabel('Map this logger\'s source channels to Velocity common engineering channels. These mappings make worksheets, compare tools, reports, RSA analysis and portable math formulas independent of vendor naming.')
+        intro.setWordWrap(True);lay.addWidget(intro)
+        table=QtWidgets.QTableWidget();table.setColumnCount(5);table.setHorizontalHeaderLabels(['Common Channel','Expected Unit','Source Channel','Source Unit','Status']);table.verticalHeader().setVisible(False)
+        specs=common_channel_specs();table.setRowCount(len(specs));table.setAlternatingRowColors(True)
+        visible=[rec for rec in channel_catalog(run) if rec.numeric and rec.name in run.data.columns and rec.source_kind in {'native','rectangular'} and not str(rec.name).startswith('__')]
+        originals=run.metadata.get('original_channel_map',{}) if isinstance(run.metadata.get('original_channel_map',{}),dict) else {}
+        combos={}
+        for row,spec in enumerate(specs):
+            table.setItem(row,0,QtWidgets.QTableWidgetItem(spec.label));table.item(row,0).setData(QtCore.Qt.UserRole,spec.key)
+            table.setItem(row,1,QtWidgets.QTableWidgetItem(spec.unit_label))
+            combo=QtWidgets.QComboBox();combo.addItem('(unassigned)','')
+            target=spec.unit
+            compatible_rows=[];other_rows=[]
+            for rec in visible:
+                source_unit=normalize_unit(rec.unit)
+                # Keep unknown-unit channels visible, but put known compatible
+                # channels first so assignment is quick without hiding evidence.
+                compatible_known=bool(target and source_unit and compatible(source_unit,target))
+                label=rec.alias or rec.name
+                if rec.alias: label=f'{rec.alias}  ({rec.name})'
+                if rec.unit: label+=f'  [{display_label(rec.unit) or rec.unit}]'
+                (compatible_rows if compatible_known else other_rows).append((label,rec.name))
+            for label,name in compatible_rows+other_rows:combo.addItem(label,name)
+            current=str(originals.get(spec.key,'') or '')
+            idx=combo.findData(current);combo.setCurrentIndex(idx if idx>=0 else 0);table.setCellWidget(row,2,combo);combos[spec.key]=combo
+            table.setItem(row,3,QtWidgets.QTableWidgetItem(display_label(run.units.get(current,'')) if current else ''))
+            status='Manual' if spec.key in h.channel_overrides else ('Learned' if current and learned_mapping_for_source(run,current)==spec.key else ('Auto' if current else 'Unmapped'))
+            table.setItem(row,4,QtWidgets.QTableWidgetItem(status))
+            combo.currentIndexChanged.connect(lambda _i,r=row,c=combo: table.setItem(r,3,QtWidgets.QTableWidgetItem(display_label(run.units.get(str(c.currentData() or ''),'')) if c.currentData() else '')))
+        table.horizontalHeader().setSectionResizeMode(0,QtWidgets.QHeaderView.ResizeToContents);table.horizontalHeader().setSectionResizeMode(1,QtWidgets.QHeaderView.ResizeToContents);table.horizontalHeader().setSectionResizeMode(2,QtWidgets.QHeaderView.Stretch);table.horizontalHeader().setSectionResizeMode(3,QtWidgets.QHeaderView.ResizeToContents);table.horizontalHeader().setSectionResizeMode(4,QtWidgets.QHeaderView.ResizeToContents)
+        lay.addWidget(table,1)
+        remember=QtWidgets.QCheckBox(f'Remember assigned source names for future {run.vendor or "same-vendor"} data logs');remember.setChecked(True);lay.addWidget(remember)
+        row=QtWidgets.QHBoxLayout();auto_btn=QtWidgets.QPushButton('Auto-detect');clear_btn=QtWidgets.QPushButton('Clear assignments');row.addWidget(auto_btn);row.addWidget(clear_btn);row.addStretch(1);lay.addLayout(row)
+        def auto_detect():
+            guessed=auto_map_channels([rec.name for rec in visible],run.units)
+            for canonical,source in guessed.items():
+                combo=combos.get(canonical)
+                if combo is not None:
+                    idx=combo.findData(source)
+                    if idx>=0:combo.setCurrentIndex(idx)
+        auto_btn.clicked.connect(auto_detect)
+        clear_btn.clicked.connect(lambda: [combo.setCurrentIndex(0) for combo in combos.values()])
+        buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel);buttons.accepted.connect(dlg.accept);buttons.rejected.connect(dlg.reject);lay.addWidget(buttons)
+        if dlg.exec()!=QtWidgets.QDialog.Accepted:return
+        try:
+            # Fail visibly on known dimensional conflicts instead of letting
+            # canonical normalization quietly reject the row after the dialog.
+            for spec in specs:
+                selected=str(combos[spec.key].currentData() or '')
+                if not selected or not spec.unit:continue
+                source_unit=normalize_unit(run.units.get(selected,''))
+                if source_unit and not compatible(source_unit,spec.unit):
+                    raise ValueError(f'{spec.label}: {selected} is {display_label(source_unit) or source_unit}, expected {spec.unit_label}.')
+            changes=0
+            for spec in specs:
+                current=str(originals.get(spec.key,'') or '')
+                selected=str(combos[spec.key].currentData() or '')
+                if selected!=current:
+                    h.channel_overrides[spec.key]=selected
+                    changes+=1
+            h.run=apply_channel_overrides(h.run,h.channel_overrides,h.unit_overrides)
+            if h.run.metadata.get('math_channels'):reapply_math_channels(h.run,list(h.run.metadata.get('math_channels',[])))
+            if remember.isChecked():
+                for spec in specs:
+                    previous=str(originals.get(spec.key,'') or '')
+                    selected=str(combos[spec.key].currentData() or '')
+                    if previous and previous!=selected and learned_mapping_for_source(h.run,previous)==spec.key:
+                        forget_common_channel_mapping(h.run,previous)
+                    if selected:remember_common_channel_mapping(h.run,selected,spec.key)
+            self.store.changed.emit();self.store.activeChanged.emit(h)
+            mapped=sum(1 for source in h.run.metadata.get('original_channel_map',{}).values() if source)
+            self.statusBar().showMessage(f'Common channel mapping updated — {mapped} roles mapped, {changes} changed',6000)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(self,'Common Channel Mapping',str(exc))
+
     def _set_channel_alias(self, channel):
         h=self.store.active
         if not h:return
         current=str(h.run.metadata.get('channel_aliases',{}).get(channel,'') or '')
-        value,ok=QtWidgets.QInputDialog.getText(self,'Channel Alias',f'Display alias for {channel}:',text=current)
+        value,ok=QtWidgets.QInputDialog.getText(self,'Display Alias',f'Display alias for {channel}:',text=current)
         if not ok:return
         try:
             set_channel_alias(h.run,channel,str(value).strip())
             self.store.changed.emit();self._refresh_channel_explorer()
-        except Exception as exc:QtWidgets.QMessageBox.warning(self,'Channel Alias',str(exc))
+        except Exception as exc:QtWidgets.QMessageBox.warning(self,'Display Alias',str(exc))
 
     def _delete_math_channel(self, channel):
         h = self.store.active
         if not h or channel not in h.run.data.columns:
             return
-        answer = QtWidgets.QMessageBox.question(self, 'Delete calculated channel', f'Delete calculated channel {channel!r} from this project session?\n\nThe source telemetry file is not modified.')
+        answer = QtWidgets.QMessageBox.question(self, 'Delete math channel', f'Delete math channel {channel!r} from this project session?\n\nThe source telemetry file is not modified.')
         if answer != QtWidgets.QMessageBox.Yes:
             return
         h.run.data.drop(columns=[channel], inplace=True, errors='ignore')
@@ -4687,34 +4842,174 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as exc:QtWidgets.QMessageBox.critical(self,'Data Gate Rejected',str(exc))
 
     def _new_math_channel(self):
-        h = self.store.active
+        self._math_channel_builder('')
+
+    def _edit_math_channel(self, channel):
+        self._math_channel_builder(str(channel or ''))
+
+    def _math_channel_builder(self, existing_channel=''):
+        h=self.store.active
         if not h:
-            QtWidgets.QMessageBox.information(self, 'Calculated Channel', 'Open a telemetry session first.')
+            QtWidgets.QMessageBox.information(self,'Math Channel Builder','Open a data log first.');return
+        run=h.run
+        existing={str(d.get('name','')):d for d in run.metadata.get('math_channels',[]) if isinstance(d,dict)}
+        current=existing.get(existing_channel,{})
+
+        dlg=QtWidgets.QDialog(self);dlg.setWindowTitle('Math Channel Builder');dlg.resize(960,650)
+        main=QtWidgets.QVBoxLayout(dlg)
+        top=QtWidgets.QGridLayout()
+        name=QtWidgets.QLineEdit(str(current.get('name','') or existing_channel));name.setPlaceholderText('e.g. Clutch Slip Ratio')
+        unit=QtWidgets.QComboBox();unit.setEditable(True);unit.addItem('(unassigned)','')
+        for key in sorted(k for k in UNITS if k):unit.addItem(display_label(key) or key,key)
+        existing_unit=str(current.get('unit','') or '')
+        idx=unit.findData(existing_unit)
+        if idx>=0:unit.setCurrentIndex(idx)
+        template=QtWidgets.QComboBox();template.addItem('(formula template)','')
+        templates=math_channel_templates()
+        for label in sorted(templates):template.addItem(label,label)
+        top.addWidget(QtWidgets.QLabel('Output name'),0,0);top.addWidget(name,0,1)
+        top.addWidget(QtWidgets.QLabel('Unit'),0,2);top.addWidget(unit,0,3)
+        top.addWidget(QtWidgets.QLabel('Template'),1,0);top.addWidget(template,1,1,1,3)
+        main.addLayout(top)
+
+        split=QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        refs=QtWidgets.QTreeWidget();refs.setHeaderLabels(['Reference','Unit / Meaning']);refs.setColumnWidth(0,255)
+        common_root=QtWidgets.QTreeWidgetItem(['Common Channels','portable across logger vendors']);font=common_root.font(0);font.setBold(True);common_root.setFont(0,font);refs.addTopLevelItem(common_root)
+        originals=run.metadata.get('original_channel_map',{}) if isinstance(run.metadata.get('original_channel_map',{}),dict) else {}
+        for spec in common_channel_specs():
+            source=str(originals.get(spec.key,'') or '')
+            label=f'{spec.label}  (@{spec.key})'
+            detail=(spec.unit_label or 'unitless') + (f'  ← {source}' if source else '  — unmapped')
+            item=QtWidgets.QTreeWidgetItem([label,detail]);item.setData(0,QtCore.Qt.UserRole,f'@{spec.key}');
+            if not source:item.setForeground(0,QtGui.QBrush(QtGui.QColor('#7e858c')))
+            common_root.addChild(item)
+        source_root=QtWidgets.QTreeWidgetItem(['Source / Calculated Channels','run-specific']);font=source_root.font(0);font.setBold(True);source_root.setFont(0,font);refs.addTopLevelItem(source_root)
+        for rec in channel_catalog(run):
+            display=rec.alias or rec.name
+            if rec.alias:display=f'{rec.alias}  ({rec.name})'
+            item=QtWidgets.QTreeWidgetItem([display,display_label(rec.unit) or rec.unit]);item.setData(0,QtCore.Qt.UserRole,f'`{rec.name}`');source_root.addChild(item)
+        refs.expandItem(common_root);refs.expandItem(source_root)
+        split.addWidget(refs)
+
+        editor_wrap=QtWidgets.QWidget();editor_lay=QtWidgets.QVBoxLayout(editor_wrap);editor_lay.setContentsMargins(6,0,0,0)
+        expr=QtWidgets.QPlainTextEdit();expr.setPlainText(str(current.get('expression','') or ''));expr.setPlaceholderText('Double-click channels on the left or type a formula.\nPortable example: (@engine_rpm / @driveshaft_rpm)\nRaw-source example: smooth(`Engine RPM`, 0.10)')
+        mono=QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.SystemFont.FixedFont);expr.setFont(mono);editor_lay.addWidget(QtWidgets.QLabel('Expression'));editor_lay.addWidget(expr,1)
+        ops=QtWidgets.QHBoxLayout();
+        for token in (' + ',' - ',' * ',' / ',' ** ','(',')'):
+            b=QtWidgets.QPushButton(token.strip() or token);b.setMaximumWidth(48);b.clicked.connect(lambda _checked=False,t=token: expr.insertPlainText(t));ops.addWidget(b)
+        ops.addStretch(1);editor_lay.addLayout(ops)
+        funcs=QtWidgets.QHBoxLayout()
+        for label,fn in [('abs','abs'),('sqrt','sqrt'),('smooth','smooth'),('d/dt','derivative'),('∫','integral'),('LPF','lowpass'),('HPF','highpass'),('Mean','rollingmean'),('RMS','rollingrms'),('Min','rollingmin'),('Max','rollingmax'),('σ','rollingstd')]:
+            b=QtWidgets.QPushButton(label);b.setToolTip(fn);b.clicked.connect(lambda _checked=False,f=fn:self._insert_math_function(expr,f));funcs.addWidget(b)
+        funcs.addStretch(1);editor_lay.addLayout(funcs)
+        help_label=QtWidgets.QLabel('Tip: use @common_channel references whenever possible. They follow the engineering role when the next data log uses different vendor/channel names. Backticks address one raw source channel by name or display alias.')
+        help_label.setWordWrap(True);help_label.setStyleSheet('color:#aeb4bb');editor_lay.addWidget(help_label)
+        preview=QtWidgets.QLabel('Preview not run.');preview.setWordWrap(True);preview.setStyleSheet('padding:6px;border:1px solid #444;background:#202225');editor_lay.addWidget(preview)
+        preview_btn=QtWidgets.QPushButton('Validate / Preview');editor_lay.addWidget(preview_btn,0,QtCore.Qt.AlignLeft)
+        split.addWidget(editor_wrap);split.setStretchFactor(0,0);split.setStretchFactor(1,1);split.setSizes([330,600]);main.addWidget(split,1)
+
+        save_template=QtWidgets.QCheckBox('Save this formula as a reusable template');template_name=QtWidgets.QLineEdit();template_name.setPlaceholderText('Template name');template_name.setEnabled(False);save_template.toggled.connect(template_name.setEnabled)
+        save_row=QtWidgets.QHBoxLayout();save_row.addWidget(save_template);save_row.addWidget(template_name,1);main.addLayout(save_row)
+
+        def insert_reference(item,_column=0):
+            text=str(item.data(0,QtCore.Qt.UserRole) or '')
+            if text:expr.insertPlainText(text)
+        refs.itemDoubleClicked.connect(insert_reference)
+
+        def apply_template(index):
+            key=str(template.itemData(index) or '')
+            if not key:return
+            rec=templates.get(key,{})
+            expr.setPlainText(str(rec.get('expression','') or ''))
+            u=str(rec.get('unit','') or '');idx=unit.findData(u)
+            if idx>=0:unit.setCurrentIndex(idx)
+            if not name.text().strip():name.setText(key)
+        template.currentIndexChanged.connect(apply_template)
+
+        def do_preview():
+            formula=expr.toPlainText().strip()
+            if not formula:
+                preview.setText('Enter an expression first.');return
+            try:
+                values=evaluate_run_expression(run,formula);finite=values[np.isfinite(values)]
+                inferred=infer_expression_dimension(run,formula)
+                if len(finite):
+                    preview.setText(f'VALID — {len(finite):,}/{len(values):,} finite samples • dimension: {inferred} • min {np.nanmin(finite):.6g} • max {np.nanmax(finite):.6g} • mean {np.nanmean(finite):.6g}')
+                else:preview.setText(f'VALID expression, but no finite output samples • dimension: {inferred}')
+                preview.setStyleSheet('padding:6px;border:1px solid #366b3c;background:#1f2b22')
+            except Exception as exc:
+                preview.setText(f'NOT VALID — {exc}');preview.setStyleSheet('padding:6px;border:1px solid #7b3636;background:#2d2020')
+        preview_btn.clicked.connect(do_preview)
+
+        buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel);buttons.accepted.connect(dlg.accept);buttons.rejected.connect(dlg.reject);main.addWidget(buttons)
+        if dlg.exec()!=QtWidgets.QDialog.Accepted:return
+        cname=name.text().strip();formula=expr.toPlainText().strip();unit_key=str(unit.currentData() or normalize_unit(unit.currentText()) or unit.currentText()).strip()
+        if not cname or not formula:
+            QtWidgets.QMessageBox.warning(self,'Math Channel Builder','Output name and expression are required.');return
+        math_defs=[dict(d) for d in run.metadata.get('math_channels',[]) if isinstance(d,dict) and str(d.get('name','')).strip()]
+        math_names={str(d.get('name','')).strip() for d in math_defs}
+        if cname in run.data.columns and cname not in math_names and cname!=existing_channel:
+            QtWidgets.QMessageBox.warning(self,'Math Channel Builder',f'{cname!r} is a source/common data channel. Math channels cannot overwrite source evidence; choose a different output name.')
             return
-        dlg = QtWidgets.QDialog(self); dlg.setWindowTitle('Calculated Channel'); dlg.resize(620, 350)
-        form = QtWidgets.QFormLayout(dlg)
-        name = QtWidgets.QLineEdit(); name.setPlaceholderText('e.g. Clutch Slip Ratio')
-        expr = QtWidgets.QPlainTextEdit(); expr.setPlaceholderText('e.g. `Engine RPM` / `Clutch RPM`'); expr.setMaximumHeight(90)
-        unit = QtWidgets.QComboBox(); unit.setEditable(True); unit.addItem('(unassigned)', '')
-        for key in sorted(k for k in UNITS if k): unit.addItem(display_label(key) or key, key)
-        form.addRow('Name', name); form.addRow('Expression', expr); form.addRow('Engineering unit', unit)
-        hint = QtWidgets.QLabel('Use backticks around parameter names containing spaces. Allowed: +  -  *  /  %  **, parentheses, abs(), sqrt(), clip(), smooth(), derivative(), integral().\nExpressions can only access telemetry channels and this engineering whitelist; arbitrary Python is not allowed.'); hint.setWordWrap(True); form.addRow(hint)
-        channels = QtWidgets.QLabel('Available parameters: ' + ', '.join(_visible_channel_names(h.run)[:18]) + (' …' if len(_visible_channel_names(h.run)) > 18 else '')); channels.setWordWrap(True); channels.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse); form.addRow(channels)
-        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel); buttons.accepted.connect(dlg.accept); buttons.rejected.connect(dlg.reject); form.addRow(buttons)
-        if dlg.exec() != QtWidgets.QDialog.Accepted:
-            return
-        cname = name.text().strip(); expression = expr.toPlainText().strip(); unit_key = str(unit.currentData() or normalize_unit(unit.currentText()) or unit.currentText()).strip()
-        replace = cname in h.run.data.columns
-        if replace:
-            answer = QtWidgets.QMessageBox.question(self, 'Replace calculated channel?', f'A channel named {cname!r} already exists. Replace it?')
-            if answer != QtWidgets.QMessageBox.Yes:
-                return
+        if cname in math_names and cname!=existing_channel:
+            answer=QtWidgets.QMessageBox.question(self,'Replace calculated channel?',f'A math channel named {cname!r} already exists. Replace that calculated definition?')
+            if answer!=QtWidgets.QMessageBox.Yes:return
         try:
-            add_math_channel(h.run, cname, expression, unit_key, persist=True, replace=replace)
-            self.store.changed.emit(); self.store.activeChanged.emit(h)
-            self.statusBar().showMessage(f'Calculated channel created: {cname}', 5000)
+            # Build the complete proposed definition set first, then validate it
+            # on a private copy. This catches dependency cycles and missing
+            # references without partially mutating the engineer's active Run.
+            proposed=[]
+            for rec in math_defs:
+                rec_name=str(rec.get('name','')).strip()
+                if rec_name in {existing_channel,cname}:
+                    continue
+                rec2=dict(rec)
+                if existing_channel and existing_channel!=cname:
+                    rec2['expression']=re.sub(r'`'+re.escape(existing_channel)+r'`',f'`{cname}`',str(rec2.get('expression','')))
+                proposed.append(rec2)
+            proposed.append({'name':cname,'expression':formula,'unit':unit_key})
+            trial=copy.deepcopy(run)
+            if existing_channel and existing_channel!=cname:
+                trial.data.drop(columns=[existing_channel],inplace=True,errors='ignore');trial.units.pop(existing_channel,None)
+            trial.metadata['math_channels']=list(proposed)
+            reapply_math_channels(trial,proposed)
+
+            # The trial succeeded: commit the same definition set atomically to
+            # the active Run. Dependent math expressions are renamed with it.
+            if existing_channel and existing_channel!=cname:
+                run.data.drop(columns=[existing_channel],inplace=True,errors='ignore');run.units.pop(existing_channel,None)
+                aliases=run.metadata.get('channel_aliases',{})
+                if isinstance(aliases,dict) and existing_channel in aliases:
+                    aliases[cname]=aliases.pop(existing_channel)
+            run.metadata['math_channels']=list(proposed)
+            reapply_math_channels(run,proposed)
+            if existing_channel and existing_channel!=cname:
+                for i in range(self.worksheets.count()):
+                    ws=self.worksheets.widget(i)
+                    for wave in ws.waveforms:
+                        if existing_channel in wave.channels:
+                            wave.channels=[cname if ch==existing_channel else ch for ch in wave.channels]
+                            if existing_channel in wave.channel_styles:
+                                wave.channel_styles[cname]=wave.channel_styles.pop(existing_channel)
+                            wave.refresh()
+            if save_template.isChecked():
+                tname=template_name.text().strip() or cname
+                save_math_channel_template(tname,formula,unit_key)
+            self.store.changed.emit();self.store.activeChanged.emit(h)
+            self.statusBar().showMessage(f'Math channel ready: {cname}',5000)
         except Exception as exc:
-            QtWidgets.QMessageBox.critical(self, 'Calculated channel rejected', str(exc))
+            QtWidgets.QMessageBox.critical(self,'Math Channel Rejected',str(exc))
+
+    def _insert_math_function(self, editor, function_name):
+        cursor=editor.textCursor();selected=cursor.selectedText().replace('\u2029',' ').strip()
+        templates={
+            'abs':lambda x:f'abs({x})','sqrt':lambda x:f'sqrt({x})',
+            'smooth':lambda x:f'smooth({x}, 0.10)','derivative':lambda x:f'derivative({x})',
+            'integral':lambda x:f'integral({x})','lowpass':lambda x:f'lowpass({x}, 20)',
+            'highpass':lambda x:f'highpass({x}, 2)','rollingmean':lambda x:f'rollingmean({x}, 0.10)','rollingrms':lambda x:f'rollingrms({x}, 0.10)','rollingmin':lambda x:f'rollingmin({x}, 0.10)','rollingmax':lambda x:f'rollingmax({x}, 0.10)','rollingstd':lambda x:f'rollingstd({x}, 0.10)',
+        }
+        seed=selected or '@engine_rpm';text=templates.get(function_name,lambda x:f'{function_name}({x})')(seed)
+        cursor.insertText(text);editor.setTextCursor(cursor);editor.setFocus()
 
     def _require_access(self, scope='desktop.access', *, allow_offline=True):
         if not self.auth_required:
@@ -5625,22 +5920,36 @@ class MainWindow(QtWidgets.QMainWindow):
         if idx>=0:unit.setCurrentIndex(idx)
         else:unit.setEditText(run.units.get(channel,''))
         form.addRow('Engineering unit',unit)
-        role=QtWidgets.QComboBox(); role.addItem('No canonical assignment','')
-        for key in CANONICAL_CHANNELS: role.addItem(key,key)
+        role=QtWidgets.QComboBox(); role.addItem('No common-channel assignment','')
+        for spec in common_channel_specs():
+            suffix=f' [{spec.unit_label}]' if spec.unit_label else ''
+            role.addItem(f'{spec.label}{suffix}',spec.key)
         current_role=next((k for k,v in run.metadata.get('original_channel_map',{}).items() if v==channel),'')
         idx=role.findData(current_role); role.setCurrentIndex(max(0,idx))
-        form.addRow('Canonical role',role)
+        form.addRow('Common channel',role)
+        remember=QtWidgets.QCheckBox(f'Remember for future {run.vendor or "same-vendor"} logs with this source name')
+        remember.setChecked(bool(current_role and learned_mapping_for_source(run,channel)==current_role));form.addRow(remember)
         prov=run.metadata.get('unit_provenance',{}).get(channel,'native / inferred source unit')
         form.addRow('Current provenance',QtWidgets.QLabel(str(prov)))
-        note=QtWidgets.QLabel('Canonical assignments feed physics/inverse tools. Raw source data is never overwritten.\nIf the unit is unknown, leave the channel unassigned rather than guessing.'); note.setWordWrap(True); form.addRow(note)
+        note=QtWidgets.QLabel('Common-channel assignments feed portable worksheets, math, comparisons and RSA tools. Display Alias is cosmetic and separate. Raw source data is never overwritten.\nIf the unit is unknown, leave the role unassigned rather than guessing.'); note.setWordWrap(True); form.addRow(note)
         buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel); buttons.accepted.connect(dlg.accept);buttons.rejected.connect(dlg.reject);form.addRow(buttons)
         if dlg.exec()!=QtWidgets.QDialog.Accepted:return
         unit_key=str(unit.currentData() or normalize_unit(unit.currentText()) or unit.currentText()).strip()
         chosen=str(role.currentData() or '')
         try:
+            if chosen:
+                target=next((spec.unit for spec in common_channel_specs() if spec.key==chosen),'')
+                effective_unit=normalize_unit(unit_key or run.units.get(channel,''))
+                if target and effective_unit and not compatible(effective_unit,target):
+                    raise ValueError(f'{channel} is {display_label(effective_unit) or effective_unit}; {common_channel_label(chosen)} expects {display_label(target) or target}.')
             if unit_key: h.unit_overrides[channel]=unit_key
-            if chosen: h.channel_overrides[chosen]=channel
+            if current_role and current_role!=chosen:h.channel_overrides[current_role]=''
+            if chosen:h.channel_overrides[chosen]=channel
+            elif current_role:h.channel_overrides[current_role]=''
             h.run=apply_channel_overrides(h.run,h.channel_overrides,h.unit_overrides)
+            if h.run.metadata.get('math_channels'):reapply_math_channels(h.run,list(h.run.metadata.get('math_channels',[])))
+            if remember.isChecked() and chosen:remember_common_channel_mapping(h.run,channel,chosen)
+            elif current_role and learned_mapping_for_source(h.run,channel):forget_common_channel_mapping(h.run,channel)
             self.store.changed.emit(); self.store.activeChanged.emit(h)
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self,'Channel mapping rejected',str(exc))
@@ -5820,7 +6129,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _new_library_metric(self):
         name,ok=QtWidgets.QInputDialog.getText(self,'Saved Metric','Metric name:');
         if not ok or not name.strip():return
-        channel,ok=QtWidgets.QInputDialog.getText(self,'Saved Metric','Channel / canonical role (for example engine_rpm):');
+        channel,ok=QtWidgets.QInputDialog.getText(self,'Saved Metric','Channel / common-channel key (for example engine_rpm):');
         if not ok or not channel.strip():return
         stats=['mean','min','max','median','std','rms','range','start','end','delta','integral','slope','p05','p95'];stat,ok=QtWidgets.QInputDialog.getItem(self,'Saved Metric','Statistic:',stats,2,False)
         if not ok:return
@@ -6010,13 +6319,15 @@ class MainWindow(QtWidgets.QMainWindow):
                             p=self.catalog.local_asset_read_path(catalog_asset_id)
                         except Exception:pass
             try:
-                h=self.store.add(p,load_telemetry(p));h.role=rec.get('role','available'); h.time_alignment_s=float(rec.get('time_alignment_s',0.0) or 0.0); h.display_name=str(rec.get('display_name') or Path(p).stem)
+                h=self.store.add(p,load_telemetry(p),apply_preferences=False);h.role=rec.get('role','available'); h.time_alignment_s=float(rec.get('time_alignment_s',0.0) or 0.0); h.display_name=str(rec.get('display_name') or Path(p).stem)
                 h.catalog_run_id=catalog_run_id;h.catalog_asset_id=catalog_asset_id;h.catalog_session_id=str(rec.get('catalog_session_id','') or '')
-                if rec.get('math_channels'):
-                    reapply_math_channels(h.run, rec.get('math_channels'))
                 h.channel_overrides=dict(rec.get('channel_overrides',{})); h.unit_overrides=dict(rec.get('unit_overrides',{}))
                 if h.channel_overrides or h.unit_overrides:
                     h.run=apply_channel_overrides(h.run,h.channel_overrides,h.unit_overrides)
+                # Portable @common-channel math definitions must be evaluated
+                # only after the workbook's source-role overrides are restored.
+                if rec.get('math_channels'):
+                    reapply_math_channels(h.run, rec.get('math_channels'))
                 if rec.get('environment'): h.run.environment=Environment.from_dict(rec['environment'])
                 if rec.get('timing'): h.run.timing=TimingData.from_dict(rec['timing'])
                 h.run.metadata['vehicle_inputs']=dict(rec.get('vehicle_inputs', rec.get('quarterpro_inputs',{})))
@@ -6141,6 +6452,12 @@ def _run_desktop_smoke_scenario(win, app) -> None:
         timing=TimingData(sixty_ft_s=1.05,three_thirty_ft_s=2.75,eighth_mile_s=4.20,quarter_mile_s=6.55),
         environment=Environment(),
     )
+    run=apply_channel_overrides(run,{
+        'time_s':'Time','engine_rpm':'RPM','speed_mph':'Speed','driveshaft_rpm':'Driveshaft','throttle_pct':'Throttle'
+    },{})
+    add_math_channel(run,'Overall Ratio','@engine_rpm / @driveshaft_rpm','ratio',persist=True)
+    if not np.isfinite(pd.to_numeric(run.data['Overall Ratio'],errors='coerce')).any():
+        raise RuntimeError('Desktop smoke test portable math channel produced no finite samples')
     win.store.add('__velocity_smoke__.csv',run,activate=True)
     sheet=win.current_sheet()
     if sheet is None or not sheet.waveforms:

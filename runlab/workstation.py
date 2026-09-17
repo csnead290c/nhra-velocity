@@ -18,6 +18,7 @@ import pandas as pd
 from .models import TelemetryRun
 from .display_data import channel_xy, prepare_plot_series
 from .units import dimension, normalize_unit
+from .common_channels import common_channel_label, common_channel_key_from_label
 
 _BACKTICK = re.compile(r"`([^`]+)`")
 
@@ -117,6 +118,20 @@ def resolve_channel(run: TelemetryRun, name_or_alias: str) -> str | None:
     hits = [channel for channel, alias in aliases.items() if alias.lower() == low and channel in names]
     if len(hits) == 1:
         return hits[0]
+    # A friendly Common Channel label (for example "Engine Speed") is also
+    # accepted anywhere a channel reference is expected.  Expressions are
+    # persisted using the stable internal key, but interactive tools should not
+    # force engineers to memorize implementation identifiers.
+    common_key = common_channel_key_from_label(needle)
+    if common_key and common_key != needle:
+        originals = run.metadata.get("original_channel_map", {}) if isinstance(run.metadata.get("original_channel_map", {}), dict) else {}
+        src = originals.get(common_key)
+        if src in names:
+            return str(src)
+        mapped = run.channel_map.get(common_key)
+        if mapped in names:
+            return str(mapped)
+
     # Canonical role is also a stable lookup key.
     virtual_roles = {}
     for key in ("model_virtual_channels", "model_residual_channels"):
@@ -188,7 +203,7 @@ def channel_catalog(run: TelemetryRun, query: str = "") -> list[ChannelDescripto
             sample_rate_hz=sr,
             numeric=numeric,
         )
-        hay = " ".join([rec.name, rec.alias, rec.unit, rec.dimension, rec.canonical_role, rec.source_kind]).lower()
+        hay = " ".join([rec.name, rec.alias, rec.unit, rec.dimension, rec.canonical_role, common_channel_label(rec.canonical_role) if rec.canonical_role else "", rec.source_kind]).lower()
         if q and q not in hay:
             continue
         out.append(rec)

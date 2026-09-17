@@ -295,9 +295,15 @@ def apply_channel_overrides(
     units = dict(run.units)
     for canonical, source in (channel_overrides or {}).items():
         canonical = str(canonical).strip()
-        source = str(source).strip()
+        source = str(source or "").strip()
         if canonical not in CANONICAL_CHANNELS:
             raise ValueError(f"Unknown canonical channel override: {canonical}")
+        # An explicit blank override means "do not assign this common role".
+        # This is different from simply omitting the override, which allows the
+        # importer's automatic mapping to remain in force.
+        if not source:
+            mapping.pop(canonical, None)
+            continue
         if source not in run.data.columns:
             raise ValueError(f"Channel override for {canonical} refers to missing source column: {source}")
         mapping[canonical] = source
@@ -308,6 +314,10 @@ def apply_channel_overrides(
         if source not in run.data.columns:
             raise ValueError(f"Unit override refers to unmapped/missing channel: {key}")
         units[source] = UNIT_HINTS.get(unit, unit)
+    # ``original_channel_map`` is the durable canonical->raw-source record.
+    # Keep it in sync with user overrides so preferences, portable math and the
+    # UI all resolve the same source after a remap/reopen.
+    run.metadata["original_channel_map"] = dict(mapping)
     run.channel_map = mapping
     run.units = units
     return _normalize_canonical(run)

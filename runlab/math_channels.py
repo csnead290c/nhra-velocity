@@ -14,7 +14,8 @@ imports and arbitrary Python execution are deliberately rejected.
 Whitelisted functions: abs(x), sqrt(x), clip(x, lo, hi), smooth(x, seconds),
 derivative(x), integral(x), lowpass(x, cutoff_hz[, order]),
 highpass(x, cutoff_hz[, order]), bandpass(x, low_hz, high_hz[, order]),
-rollingmean(x, seconds), and rollingrms(x, seconds). Time-domain engineering
+rollingmean(x, seconds), rollingrms(x, seconds), rollingmin(x, seconds),
+rollingmax(x, seconds), and rollingstd(x, seconds). Time-domain engineering
 functions use the run's canonical time channel and fail closed when a valid
 monotonic timebase is absent.
 """
@@ -28,11 +29,13 @@ import numpy as np
 import pandas as pd
 
 from .models import TelemetryRun
+from .importers import CANONICAL_CHANNELS
 from .units import normalize_unit, UNITS
 from .signal_analysis import filter_on_original_timebase
 
 
 _BACKTICK = re.compile(r"`([^`]+)`")
+_CANONICAL_REF = re.compile(r"@([A-Za-z_][A-Za-z0-9_]*)")
 
 
 @dataclass
@@ -113,7 +116,7 @@ def _eval_node(node: ast.AST, env: Dict[str, np.ndarray], df: pd.DataFrame, time
         return _ALLOWED_UNARY[type(node.op)](_eval_node(node.operand, env, df, time_column))
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         fname = node.func.id.lower()
-        if fname not in {"abs","sqrt","clip","smooth","derivative","integral","lowpass","highpass","bandpass","rollingmean","rollingrms"}:
+        if fname not in {"abs","sqrt","clip","smooth","derivative","integral","lowpass","highpass","bandpass","rollingmean","rollingrms","rollingmin","rollingmax","rollingstd"}:
             raise ValueError(f"Math function {fname!r} is not allowed.")
         args=[_eval_node(a,env,df,time_column) for a in node.args]
         if fname=="abs" and len(args)==1:
@@ -146,14 +149,16 @@ def _eval_node(node: ast.AST, env: Dict[str, np.ndarray], df: pd.DataFrame, time
             arr=np.asarray(args[0],dtype=float); t=_time_vector(df,time_column)
             lo=float(np.asarray(args[1]).flat[0]); hi=float(np.asarray(args[2]).flat[0]); order=int(float(np.asarray(args[3]).flat[0])) if len(args)==4 else 4
             return filter_on_original_timebase(t,arr,kind='bandpass',cutoff_hz=(lo,hi),order=order)
-        if fname in {"rollingmean","rollingrms"} and len(args)==2:
+        if fname in {"rollingmean","rollingrms","rollingmin","rollingmax","rollingstd"} and len(args)==2:
             arr=np.asarray(args[0],dtype=float); t=_time_vector(df,time_column)
             seconds=float(np.asarray(args[1]).flat[0])
             if seconds<=0: raise ValueError('Rolling window must be positive.')
             dt=float(np.nanmedian(np.diff(t))); n=max(1,int(round(seconds/max(dt,1e-12))))
-            series=pd.Series(arr)
-            if fname=='rollingmean':
-                return series.rolling(n,center=True,min_periods=1).mean().to_numpy(float)
+            series=pd.Series(arr); rolling=series.rolling(n,center=True,min_periods=1)
+            if fname=='rollingmean': return rolling.mean().to_numpy(float)
+            if fname=='rollingmin': return rolling.min().to_numpy(float)
+            if fname=='rollingmax': return rolling.max().to_numpy(float)
+            if fname=='rollingstd': return rolling.std(ddof=0).fillna(0.0).to_numpy(float)
             return np.sqrt(series.pow(2).rolling(n,center=True,min_periods=1).mean().to_numpy(float))
         raise ValueError(f"Invalid arguments for math function {fname!r}.")
     raise ValueError(
@@ -161,6 +166,52 @@ def _eval_node(node: ast.AST, env: Dict[str, np.ndarray], df: pd.DataFrame, time
         "parentheses, arithmetic and the approved engineering functions only."
     )
 
+
+
+def resolve_expression_references(run: TelemetryRun, expression: str) -> str:
+    """Resolve portable common-channel and display-alias references.
+
+    ``@engine_rpm`` style references are intentionally stable across logger
+    vendors. Backtick references may use either an actual source-channel name
+    or the run-local display alias. The returned expression contains only
+    concrete dataframe channel names and can be evaluated by the safe AST
+    engine below.
+    """
+    text = str(expression or "")
+
+    def common_repl(match: re.Match[str]) -> str:
+        canonical = match.group(1)
+        if canonical not in CANONICAL_CHANNELS:
+            raise ValueError(f"Unknown common channel reference: @{canonical}")
+        source = run.channel_map.get(canonical)
+        if not source or source not in run.data.columns:
+            raise ValueError(
+                f"Common channel @{canonical} is not mapped for this data set. "
+                "Assign it in Data > Common Channel Mapping first."
+            )
+        return f"`{source}`"
+
+    text = _CANONICAL_REF.sub(common_repl, text)
+
+    # Resolve backtick aliases after canonical references have been expanded.
+    from .workstation import resolve_channel
+
+    def alias_repl(match: re.Match[str]) -> str:
+        requested = match.group(1)
+        if requested in run.data.columns:
+            resolved = requested
+        else:
+            resolved = resolve_channel(run, requested)
+        if not resolved or resolved not in run.data.columns:
+            raise ValueError(f"Unknown channel or alias in expression: {requested!r}")
+        return f"`{resolved}`"
+
+    return _BACKTICK.sub(alias_repl, text)
+
+
+def evaluate_run_expression(run: TelemetryRun, expression: str) -> np.ndarray:
+    resolved = resolve_expression_references(run, expression)
+    return evaluate_expression(run.data, resolved, time_column=run.channel_map.get("time_s"))
 
 def evaluate_expression(df: pd.DataFrame, expression: str, *, time_column: str | None = None) -> np.ndarray:
     if not str(expression).strip():
@@ -201,7 +252,7 @@ def add_math_channel(
         raise ValueError(f"Unknown engineering unit: {unit!r}")
     if unit_key:
         validate_expression_unit(run, expression, unit_key)
-    values = evaluate_expression(run.data, expression, time_column=run.channel_map.get("time_s"))
+    values = evaluate_run_expression(run, expression)
     run.data[cname] = values
     run.units[cname] = unit_key
     run.metadata.setdefault("unit_provenance", {})[cname] = (
@@ -214,7 +265,15 @@ def add_math_channel(
     return run
 
 
-def reapply_math_channels(run: TelemetryRun, definitions) -> TelemetryRun:
+def _math_definition_order(definitions) -> list[dict]:
+    """Return calculated-channel definitions in dependency-safe order.
+
+    Run-local math channels may reference other calculated channels by their
+    backtick name.  Recalculation after remapping must therefore never depend
+    on whatever stale calculated columns happened to be left in the dataframe.
+    """
+    records: dict[str, dict] = {}
+    insertion: list[str] = []
     for rec in definitions or []:
         if not isinstance(rec, dict):
             continue
@@ -222,7 +281,57 @@ def reapply_math_channels(run: TelemetryRun, definitions) -> TelemetryRun:
         expression = str(rec.get("expression", "")).strip()
         if not name or not expression:
             continue
-        add_math_channel(run, name, expression, str(rec.get("unit", "")), persist=True, replace=True)
+        if name not in records:
+            insertion.append(name)
+        records[name] = dict(rec)
+    names = set(records)
+    deps: dict[str, set[str]] = {}
+    for name, rec in records.items():
+        refs = set(_BACKTICK.findall(str(rec.get("expression", ""))))
+        deps[name] = {ref for ref in refs if ref in names and ref != name}
+        if name in refs:
+            raise ValueError(f"Calculated channel dependency cycle: {name} -> {name}")
+    out: list[str] = []
+    pending = set(names)
+    while pending:
+        ready = [name for name in insertion if name in pending and deps[name].issubset(set(out))]
+        if not ready:
+            cycle = " -> ".join(sorted(pending))
+            raise ValueError(f"Calculated channel dependency cycle: {cycle}")
+        for name in ready:
+            out.append(name)
+            pending.remove(name)
+    return [records[name] for name in out]
+
+
+def reapply_math_channels(run: TelemetryRun, definitions) -> TelemetryRun:
+    ordered = _math_definition_order(definitions)
+    math_names = {str(rec.get("name", "")).strip() for rec in ordered}
+    # Remove the previous calculated results first.  This guarantees that a
+    # missing or out-of-order dependency cannot be accidentally satisfied by a
+    # stale result from the previous mapping/evaluation.
+    for name in math_names:
+        if name in run.data.columns:
+            run.data.drop(columns=[name], inplace=True, errors="ignore")
+        run.units.pop(name, None)
+        run.metadata.get("unit_provenance", {}).pop(name, None)
+    for rec in ordered:
+        add_math_channel(
+            run,
+            str(rec.get("name", "")),
+            str(rec.get("expression", "")),
+            str(rec.get("unit", "")),
+            persist=False,
+            replace=True,
+        )
+    run.metadata["math_channels"] = [
+        MathChannelDefinition(
+            str(rec.get("name", "")).strip(),
+            str(rec.get("expression", "")).strip(),
+            normalize_unit(str(rec.get("unit", ""))),
+        ).to_dict()
+        for rec in ordered
+    ]
     return run
 
 # ---- Conservative unit/dimension inference ---------------------------------
@@ -235,7 +344,8 @@ def infer_expression_dimension(run: TelemetryRun, expression: str) -> str:
     prevents assigning e.g. psi to an expression that is clearly still RPM.
     """
     from .units import dimension
-    prepared,mapping=_prepare(expression,run.data.columns)
+    resolved=resolve_expression_references(run,expression)
+    prepared,mapping=_prepare(resolved,run.data.columns)
     try: tree=ast.parse(prepared,mode='eval')
     except SyntaxError as exc: raise ValueError(f'Invalid math expression: {exc.msg}') from exc
     dims={key:dimension(run.units.get(channel,'')) for key,channel in mapping.items()}
@@ -262,7 +372,7 @@ def infer_expression_dimension(run: TelemetryRun, expression: str) -> str:
             if isinstance(node.op,(ast.Pow,ast.Mod)):return 'unknown'
         if isinstance(node,ast.Call) and isinstance(node.func,ast.Name):
             fname=node.func.id.lower(); args=[walk(x) for x in node.args]
-            if fname in {'abs','clip','smooth','lowpass','highpass','bandpass','rollingmean','rollingrms'}:
+            if fname in {'abs','clip','smooth','lowpass','highpass','bandpass','rollingmean','rollingrms','rollingmin','rollingmax','rollingstd'}:
                 return args[0] if args else 'unknown'
             if fname=='sqrt':return 'unknown'
             if fname in {'derivative','integral'}:return 'unknown'

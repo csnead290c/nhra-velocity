@@ -1,10 +1,10 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.14**
+Validated build: **0.38.0-dev.15**
 
 ## Scope
 
-This validation covers the dev.14 packaged-Windows reliability gate and product audit on top of the dev.13.1 startup hardening, dev.13 analysis/statistics consistency work, durable Run-data reopen, ATLAS-style waveform interaction, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
+This validation covers the dev.15 Common Channel / Math Channel Builder foundation on top of the dev.14 packaged-Windows reliability gate and product audit on top of the dev.13.1 startup hardening, dev.13 analysis/statistics consistency work, durable Run-data reopen, ATLAS-style waveform interaction, staged/background Tech Services sync, protected account flow, manual launch re-zero, Run-first workspace, and native logger support.
 
 ## Results
 
@@ -71,3 +71,13 @@ The earlier persistence regression only proved that the Run→Asset row and mana
 - Windows development and tagged-release workflows now validate both the frozen and installed desktop with `--smoke-test`; these are intended to catch startup/Qt/PyInstaller regressions that source-only tests cannot detect.
 - The packaged smoke scenario exercises MainWindow construction, pyqtgraph rendering, live/reference cursor statistics, and representative Analysis displays without network access.
 - A broader Qt-only test constructs the normal daily Analysis display set with realistic main/reference sessions; it runs on Windows build agents where PySide6 is installed.
+
+## dev.15 Common Channel / Math validation
+
+- Full automated source suite: **257 passed, 1 Qt-only test skipped** in the Linux packaging environment before final documentation/version updates.
+- Added focused regression coverage for Common Channel labels, explicit assign/unassign behavior, vendor-scoped learned mappings, dimensional-safety rejection, friendly-label resolution, portable `@common_role` calculations across differently named vendor data sets, display-alias references, reusable math templates, rolling engineering functions, remap-driven recalculation, dependency ordering/cycle rejection, and Analysis Library interoperability.
+- Native decoder/plot self-test: **3/3 passed** for bundled RacePak, MoTeC and MaxxECU pipelines.
+- `python -m compileall -q desktop.py runlab tests` passed.
+- Strict release audit with the pinned RSA/Tech Services SHAs reports **0 errors / 0 warnings**. The manifest remains pinned to those verified upstream revisions.
+- Workbook loading explicitly suppresses global learned Common Channel preferences, restores workbook-specific mappings first, then reapplies math definitions. This preserves saved-project determinism.
+- Math dependency reapplication removes stale calculated results, evaluates definitions in dependency order, and rejects cycles so a remap cannot silently produce a dependent channel from an old intermediate value.

@@ -1,3 +1,32 @@
+# NHRA Velocity v0.38 development
+
+## v0.38.0-dev.15 — Common Channels + Math Channel Builder
+
+- Split channel naming into two explicit concepts: **Display Alias** is cosmetic/run-local, while **Common Channel** is the stable engineering identity used by comparisons, Quick Graphs, reports, RSA workflows and portable calculations. Friendly roles include Engine Speed, Driveshaft Speed, Vehicle Speed, Throttle Position, pressures, temperatures, acceleration, GPS and more.
+- Added **Data → Common Channel Mapping…** (`Ctrl+Alt+M`) with a full-data-set mapping table, expected/source units, dimensional conflict checks, auto-detect, clear/unassign, and vendor-scoped learned mappings. Once an engineer teaches Velocity that a vendor source name means Engine Speed (or another common role), later logs from the same vendor/source name can inherit that mapping automatically when dimensionally safe.
+- Added per-channel **Assign Common Channel…** and clarified the existing rename feature as **Display Alias…** so a pretty label can never silently change engineering meaning. Waveform headers and Channel Explorer now prefer the friendly Common Channel label where appropriate.
+- Rebuilt **Math Channel Builder…** (`Ctrl+M`) around portable engineering references. Formulas can use stable references such as `@engine_rpm / @driveshaft_rpm`, raw/display-alias backtick references, double-click insertion, function buttons, live validation/preview, engineering-unit assignment and reusable templates.
+- Added rolling Min/Max/Std functions and common rate units (`rpm/s`, `mph/s`, `psi/s`, `%/s`) to the safe math engine. Math channels may depend on other math channels; recalculation now topologically orders dependencies and rejects cycles instead of accidentally using stale calculated values.
+- Common-channel formulas now work inside the existing portable Analysis Library as well, avoiding a second incompatible math dialect. Friendly names such as `Engine Speed` also resolve interactively while persisted formulas keep stable machine-facing keys.
+- Remapping a Common Channel automatically recalculates dependent math channels. Editing/renaming a math channel is validated on a private Run copy before mutation; dependent backtick formulas and active waveform references follow a successful rename, while source evidence can never be overwritten by a math output.
+- Workbook loading now restores saved channel/unit mappings before recalculating math channels, preserving deterministic portable formulas rather than allowing global learned preferences to contaminate a saved workbook.
+- Packaged desktop smoke testing now exercises a portable Common Channel math calculation in addition to the existing waveform/reference/statistics path.
+
+## v0.38.0-dev.14 — reliability gate and product audit
+
+- Added `PRODUCT_AUDIT_v0_38.md` with a current-state scorecard, immediate product rules, phased execution plan, and explicit 1.0 acceptance test.
+- Added `--smoke-test` to the actual desktop entry point. The smoke path is network-free, bypasses account prompts only for the test process, constructs the real MainWindow, renders a representative waveform, enables reference/statistics, and constructs common analysis displays.
+- Windows development and release workflows now smoke-test both the frozen PyInstaller executable and the silently installed Inno Setup application. A packaged Qt startup failure now blocks the artifact/release.
+- Fixed the Inno Setup version variable mismatch: installer metadata now consumes `NHRA_VELOCITY_VERSION`, the same variable emitted by CI/release workflows.
+- Expanded Windows Qt smoke coverage so ordinary Analysis displays are constructed/refreshed with realistic main/reference sessions.
+
+## v0.38.0-dev.13.1 — Windows startup hardening
+
+- Installs native/Python fault capture before `MainWindow` construction so `pythonw.exe` startup failures cannot vanish silently.
+- Wraps main-window construction and authentication startup in durable logging/error reporting.
+- The Windows dev launcher is replaced by a hidden, blocking WSH/CMD handoff so the application process is not orphaned by a short-lived terminal launcher.
+- Normal desktop launch remains console-free while launch/update diagnostics are written to the Velocity local app-data folder.
+
 ## v0.38.0-dev.13 — statistics, channel control, analysis consistency, exact re-zero
 
 - Added ATLAS-style **reference-to-live-cursor statistics** directly to waveform band headers. The new **Stats** menu exposes Delta, Minimum, Maximum, Mean and Standard Deviation, with `E/M/X/N/Q` shortcuts and a one-click clear action.
@@ -6,8 +35,6 @@
 - Reworked Region Statistics and reference-limited FFT/PSD from the legacy A/B cursor pair to the visible Reference→Cursor model.
 - Hardened manual launch re-zero: the selected displayed cursor position is first converted back to logger time, snapped to the effective logger sample, persisted as that exact sample, and any display-only alignment is cleared. Reference/B cursor positions are translated so they remain on the same physical samples.
 - Added focused UI/source contract coverage for waveform statistics, channel management, quick-analysis construction and repeat manual re-zero.
-
-# NHRA Velocity v0.38 development
 
 ## v0.38.0-dev.12 — live cursor readout + durable Run data + event scope fix
 
@@ -121,18 +148,3 @@
 - Corrected Tech Services timing translation for 60 ft and 1000 ft values and added canonical 1000-ft MPH support to `TimingData`.
 - Re-opening an already-loaded catalog telemetry Asset now activates the existing session instead of duplicating it.
 - Application identity is now `NHRA.Velocity`; historical source/release records retain their original names.
-
-### v0.38.0-dev.13.1 — Windows startup hardening
-
-- Installs native/Python fault capture before `MainWindow` construction so `pythonw.exe` startup failures cannot vanish silently.
-- Wraps main-window construction and authentication startup in durable logging/error reporting.
-- The Windows dev launcher is replaced by a hidden, blocking WSH/CMD handoff so the application process is not orphaned by a short-lived terminal launcher.
-- Normal desktop launch remains console-free while launch/update diagnostics are written to the Velocity local app-data folder.
-
-## v0.38.0-dev.14 — reliability gate and product audit
-
-- Added `PRODUCT_AUDIT_v0_38.md` with a current-state scorecard, immediate product rules, phased execution plan, and explicit 1.0 acceptance test.
-- Added `--smoke-test` to the actual desktop entry point. The smoke path is network-free, bypasses account prompts only for the test process, constructs the real MainWindow, renders a representative waveform, enables reference/statistics, and constructs common analysis displays.
-- Windows development and release workflows now smoke-test both the frozen PyInstaller executable and the silently installed Inno Setup application. A packaged Qt startup failure now blocks the artifact/release.
-- Fixed the Inno Setup version variable mismatch: installer metadata now consumes `NHRA_VELOCITY_VERSION`, the same variable emitted by CI/release workflows.
-- Expanded Windows Qt smoke coverage so ordinary Analysis displays are constructed/refreshed with realistic main/reference sessions.

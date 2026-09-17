@@ -29,7 +29,8 @@ from .product_manifest import ANALYSIS_LIBRARY_FORMAT_VERSION
 LIBRARY_VERSION = ANALYSIS_LIBRARY_FORMAT_VERSION
 _LIBRARY_EXT = ".nhralib"
 _BACKTICK = re.compile(r"`([^`]+)`")
-_MATH_FUNCS = {"abs", "sqrt", "clip", "smooth", "derivative", "integral", "lowpass", "highpass", "bandpass", "rollingmean", "rollingrms"}
+_COMMON_REF = re.compile(r"@([A-Za-z_][A-Za-z0-9_]*)")
+_MATH_FUNCS = {"abs", "sqrt", "clip", "smooth", "derivative", "integral", "lowpass", "highpass", "bandpass", "rollingmean", "rollingrms", "rollingmin", "rollingmax", "rollingstd"}
 _GATE_FUNCS = {"abs", "isfinite", "between"}
 
 
@@ -211,8 +212,9 @@ def starter_library() -> DefinitionLibrary:
 
 
 def _symbol_refs(expression: str, allowed_functions: set[str]) -> set[str]:
-    refs = set(_BACKTICK.findall(str(expression or "")))
-    prepared = _BACKTICK.sub("0", str(expression or ""))
+    raw = str(expression or "")
+    refs = set(_BACKTICK.findall(raw)) | set(_COMMON_REF.findall(raw))
+    prepared = _COMMON_REF.sub("0", _BACKTICK.sub("0", raw))
     try:
         tree = ast.parse(prepared, mode="eval")
     except SyntaxError:
@@ -312,6 +314,14 @@ def materialize_expression(run: TelemetryRun, lib: DefinitionLibrary, expression
         placeholders[key] = value
         return key
     prepared = _BACKTICK.sub(backtick, expr)
+    def common_ref(match: re.Match[str]) -> str:
+        key = f"__portable_ref_{len(placeholders)}"
+        kind, value = _portable_token(run, lib, match.group(1))
+        if kind == "missing":
+            raise ValueError(f"Missing common-channel reference: @{match.group(1)}")
+        placeholders[key] = value
+        return key
+    prepared = _COMMON_REF.sub(common_ref, prepared)
     try:
         tree = ast.parse(prepared, mode="eval")
     except SyntaxError as exc:

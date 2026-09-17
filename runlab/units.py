@@ -34,6 +34,7 @@ UNITS: Dict[str, UnitSpec] = {
     "ratio": UnitSpec("ratio", "ratio", ""),
     "fraction": UnitSpec("fraction", "ratio", "", 1.0),
     "pct": UnitSpec("pct", "ratio", "%", 0.01),
+    "pctps": UnitSpec("pctps", "ratio_rate", "%/s", 1.0),
 
     "s": UnitSpec("s", "time", "s", 1.0),
     "ms": UnitSpec("ms", "time", "ms", 0.001),
@@ -44,6 +45,7 @@ UNITS: Dict[str, UnitSpec] = {
     "kmh": UnitSpec("kmh", "speed", "km/h", 0.621371192237334),
     "mps": UnitSpec("mps", "speed", "m/s", 2.2369362920544),
     "fps": UnitSpec("fps", "speed", "ft/s", 3600.0 / 5280.0),
+    "mphps": UnitSpec("mphps", "speed_rate", "mph/s", 1.0),
 
     "g": UnitSpec("g", "acceleration", "g", 1.0),
     "mps2": UnitSpec("mps2", "acceleration", "m/s²", 1.0 / 9.80665),
@@ -52,11 +54,13 @@ UNITS: Dict[str, UnitSpec] = {
     "rpm": UnitSpec("rpm", "angular_speed", "rpm", 1.0),
     "rps": UnitSpec("rps", "angular_speed", "rev/s", 60.0),
     "radps": UnitSpec("radps", "angular_speed", "rad/s", 60.0 / (2.0 * math.pi)),
+    "rpmps": UnitSpec("rpmps", "angular_acceleration", "rpm/s", 1.0),
 
     "psi": UnitSpec("psi", "pressure", "psi", 1.0),
     "kpa": UnitSpec("kpa", "pressure", "kPa", 0.14503773773020923),
     "bar": UnitSpec("bar", "pressure", "bar", 14.503773773),
     "pa": UnitSpec("pa", "pressure", "Pa", 0.00014503773773020923),
+    "psips": UnitSpec("psips", "pressure_rate", "psi/s", 1.0),
 
     "hp": UnitSpec("hp", "power", "hp", 1.0),
     "kw": UnitSpec("kw", "power", "kW", 1.341022089595),
@@ -95,7 +99,7 @@ ALIASES = {
     "minute": "min", "minutes": "min",
     # speed
     "km/h": "kmh", "kph": "kmh", "kmph": "kmh", "km/hr": "kmh",
-    "mi/h": "mph", "mi/hr": "mph",
+    "mi/h": "mph", "mi/hr": "mph", "mph/s": "mphps", "mph/sec": "mphps",
     "m/s": "mps", "m/sec": "mps",
     "ft/s": "fps", "ft/sec": "fps",
     # acceleration
@@ -104,9 +108,9 @@ ALIASES = {
     "ft/s2": "fps2", "ft/s^2": "fps2", "ft/s²": "fps2",
     # angular
     "rev/min": "rpm", "r/min": "rpm", "1/min": "rpm",
-    "rev/s": "rps", "rad/s": "radps",
+    "rev/s": "rps", "rad/s": "radps", "rpm/s": "rpmps", "rpm/sec": "rpmps",
     # pressure
-    "kilopascal": "kpa", "kilopascals": "kpa", "psig": "psi", "psia": "psi",
+    "kilopascal": "kpa", "kilopascals": "kpa", "psig": "psi", "psia": "psi", "psi/s": "psips", "psi/sec": "psips",
     # power
     "horsepower": "hp", "bhp": "hp", "whp": "hp",
     "kilowatt": "kw", "kilowatts": "kw", "watt": "w", "watts": "w",
@@ -115,7 +119,7 @@ ALIASES = {
     "lb-in": "lbin", "lb in": "lbin", "lbf-in": "lbin",
     "n-m": "nm", "n m": "nm", "n·m": "nm", "nm": "nm",
     # misc
-    "percent": "pct", "%": "pct",
+    "percent": "pct", "%": "pct", "%/s": "pctps", "%/sec": "pctps",
     "volts": "v", "volt": "v", "amps": "a", "amp": "a",
     "°f": "f", "degf": "f", "fahrenheit": "f",
     "°c": "c", "degc": "c", "celsius": "c",

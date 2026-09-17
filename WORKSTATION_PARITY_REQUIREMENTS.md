@@ -35,7 +35,7 @@ Status meanings:
 | --- | --- | --- |
 | Dockable/floating workbook pages | Implemented | Mature layout templates, global/local display properties, page-level compare selection |
 | Channel/parameter browser | Implemented | Groups, favorites, aliases, source/rate/unit/type metadata, drag/drop, user collections |
-| Channel aliases | Implemented | Shareable vehicle/class alias libraries |
+| Common-channel aliases/mapping | Implemented in dev.15 | Shareable vehicle/class/team mapping profiles and server-backed libraries |
 | Canonical channel roles | Implemented | Class/vehicle templates and auto-assignment review tooling |
 | Time-series waveform | Implemented | Reference cursors, trace bands, advanced axis properties, per-parameter scales |
 | Time / distance axes | Implemented | Improve distance reconstruction and GPS/downtrack fusion |
@@ -51,7 +51,7 @@ Status meanings:
 | PSD / Welch spectrum | Implemented | Frequency-band metrics and vibration presets |
 | Spectrogram | Implemented | Linked time-frequency cursor and saved display settings |
 | Load / heat / mixture map | Implemented | Cell annotations, configurable scales, lookup/reference surfaces, 3-D surface view |
-| User math channels | Implemented + portable library | Dependency graph/cycle validation implemented; add lazy evaluation, richer functions and lookup tables |
+| User math channels | Math Channel Builder + portable @Common Channel formulas in dev.15 | Shareable library UX, lazy evaluation, richer functions and lookup tables |
 | Data gates / conditions | Implemented + portable library | Apply consistently to every display and future live alarms |
 | Channel/setup constants | Implemented foundation | Expand setup-sheet integration, unit/dimension inference and vehicle/class libraries |
 | Official drag segments | Implemented + portable templates | Add event-to-event/rule-generated segment boundaries |
