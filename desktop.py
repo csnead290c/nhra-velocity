@@ -7195,6 +7195,7 @@ def main():
     try:
         win=MainWindow()
         win_ref['win']=win
+        logging.info('Main window constructed')
         if not smoke_test:
             try:
                 win.auth.restore()
@@ -7204,12 +7205,25 @@ def main():
         if win.auth_required and not smoke_test:
             status=win.auth.status()
             if not (status.online_access_valid or status.offline_access_valid):
+                # The sign-in dialog used to be parented to a main window that
+                # had never been shown.  On some Windows desktop/terminal
+                # combinations that can leave the modal login behind other
+                # windows and make startup look like a no-op.  Show the empty
+                # shell first; protected data has not been loaded or synced yet.
+                logging.info('Tech Services sign-in required before protected startup')
+                win.show()
+                win.raise_()
+                win.activateWindow()
+                app.processEvents()
                 if not win._sign_in():
                     QtWidgets.QMessageBox.critical(win,'NHRA Tech Services sign-in required',
                         'This protected NHRA Velocity build requires an authorized NHRA Tech Services account.\n\n'
                         'Sign-in was not completed, so the application will remain closed.')
+                    win.close()
                     return 4
-        win.show()
+        if not win.isVisible():
+            win.show()
+        logging.info('Main window visible')
         if smoke_test:
             try:
                 _run_desktop_smoke_scenario(win,app)
