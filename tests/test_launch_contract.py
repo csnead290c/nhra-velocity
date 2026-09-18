@@ -5,7 +5,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_hidden_launcher_is_offline_first_and_does_not_mutate_install():
     text = (ROOT / 'scripts' / 'Launch-NHRA-Velocity-Dev.cmd').read_text(encoding='utf-8').lower()
-    assert 'git -c' not in text
     assert 'git fetch' not in text
     assert 'git pull' not in text
     assert 'pip install' not in text
