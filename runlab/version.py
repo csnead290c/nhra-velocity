@@ -6,7 +6,7 @@ Development branches use semantic pre-release versions. Stable GitHub releases
 remove the pre-release suffix and are tagged ``vX.Y.Z``.
 """
 
-__version__ = "0.38.0-dev.23"
+__version__ = "0.38.0-dev.24"
 __channel__ = "development"
 
 

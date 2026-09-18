@@ -95,3 +95,11 @@ def test_macos_plan_keeps_one_engine_and_requires_signed_distribution():
     assert 'Developer ID' in plan
     assert 'notar' in plan.lower()
     assert 'Keychain' in plan
+
+
+def test_desktop_smoke_uses_live_waveform_plot_collection():
+    # WaveformDisplay stores rendered plots in _plots.  A stale public-name
+    # reference caused the Windows smoke gate to fail before GitHub push.
+    assert 'len(wave.plots)' not in DESKTOP
+    assert 'rendered_plot_count=len(wave._plots)' in DESKTOP
+    assert 'PACKAGED_DESKTOP_SMOKE_FAIL:' in DESKTOP

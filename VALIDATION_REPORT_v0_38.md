@@ -1,6 +1,15 @@
 # NHRA Velocity v0.38 Development Validation
 
-Validated build: **0.38.0-dev.23**
+Validated build: **0.38.0-dev.24**
+
+### dev.24 Windows smoke-gate hotfix
+- Fixed the smoke scenario to count the real `WaveformDisplay._plots` collection.
+- The prior `wave.plots` access raised `AttributeError` only when the real Qt smoke scenario ran on Windows.
+- Smoke failures now print their exception and traceback directly in the updater console in addition to the log file.
+- Source suite: 301 passed, 1 skipped.
+- Native decoder self-tests: 3/3 passed.
+- Strict release audit: 0 errors / 0 warnings after manifest update.
+
 
 ## Scope
 

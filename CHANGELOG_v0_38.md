@@ -1,5 +1,12 @@
 # NHRA Velocity v0.38 development
 
+## v0.38.0-dev.24
+
+- Fixed the Windows desktop smoke gate to inspect the actual `WaveformDisplay._plots` collection instead of a nonexistent `plots` attribute.
+- Smoke-test failures now print the real exception and traceback to the updater console as well as the diagnostic log.
+- This is a validation-gate hotfix; no RacePak corpus-evidence authority rules were loosened.
+
+
 ## v0.38.0-dev.23 — RacePak Evidence Safety / Exact Descriptor Recovery
 
 - Reworked the dev.22 empirical RacePak channel-id feature around a stricter rule: **numeric `_CONNECT4_COMMAND` history is evidence only and never automatically renames an unknown DDF channel**, regardless of how many known configurations agree. This directly avoids over-assuming that a slot/id has one global meaning across cars.

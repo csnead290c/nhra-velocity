@@ -7144,15 +7144,16 @@ def _run_desktop_smoke_scenario(win, app) -> None:
     wave=sheet.waveforms[0]
     wave.channels=['RPM','Speed','Throttle']
     wave.refresh();app.processEvents()
-    if len(wave.plots) != 3:
-        raise RuntimeError(f'Desktop smoke test rendered {len(wave.plots)} waveform bands; expected 3')
+    rendered_plot_count=len(wave._plots)
+    if rendered_plot_count != 3:
+        raise RuntimeError(f'Desktop smoke test rendered {rendered_plot_count} waveform bands; expected 3')
     win.cursors.x=1.25;win.cursors.a=0.55;wave.reference_visible=True
     wave._set_readout_stat('show_stat_min',True);wave._set_readout_stat('show_stat_max',True);wave._refresh_readout();app.processEvents()
     for factory in (sheet.add_region_stats,sheet.add_histogram,sheet.add_scatter,sheet.add_spectrum,sheet.add_sensor_health):
         dock=factory();widget=dock.widget()
         if hasattr(widget,'refresh'):widget.refresh()
         app.processEvents()
-    logging.info('PACKAGED_DESKTOP_SMOKE_PASS version=%s plots=%s',PRODUCT_VERSION,len(wave.plots))
+    logging.info('PACKAGED_DESKTOP_SMOKE_PASS version=%s plots=%s',PRODUCT_VERSION,rendered_plot_count)
 
 
 def main():
@@ -7212,8 +7213,12 @@ def main():
         if smoke_test:
             try:
                 _run_desktop_smoke_scenario(win,app)
-            except Exception:
+            except Exception as exc:
                 logging.exception('PACKAGED_DESKTOP_SMOKE_FAIL')
+                # The updater runs this from a console.  Emit the actual failure
+                # there as well as to the rotating log so a screenshot is useful.
+                print(f'PACKAGED_DESKTOP_SMOKE_FAIL: {exc}', file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
                 return 6
             QtCore.QTimer.singleShot(150,app.quit)
         else:
