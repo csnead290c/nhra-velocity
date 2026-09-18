@@ -48,6 +48,7 @@ except ImportError as exc:  # pragma: no cover - environment dependent
 
 from runlab.branding import PRODUCT_NAME, PRODUCT_TAGLINE, PRODUCT_VERSION
 from runlab.product_manifest import WORKBOOK_FORMAT_VERSION
+from runlab.project_io import atomic_write_json, read_project_json, is_recovery_newer, projects_equivalent
 from runlab.importers import load_telemetry, apply_channel_overrides, auto_map_channels, CANONICAL_CHANNELS, telemetry_file_candidate
 from runlab.import_registry import qt_file_dialog_filter
 from runlab.models import TelemetryRun, Environment, TimingData
@@ -7153,7 +7154,16 @@ def _run_desktop_smoke_scenario(win, app) -> None:
         dock=factory();widget=dock.widget()
         if hasattr(widget,'refresh'):widget.refresh()
         app.processEvents()
-    logging.info('PACKAGED_DESKTOP_SMOKE_PASS version=%s plots=%s',PRODUCT_VERSION,rendered_plot_count)
+    # Exercise the same durable recovery path used by the autosave timer.
+    # A prior regression left the helper symbols unimported, so normal analysis
+    # worked while every timed recovery snapshot failed in the background.
+    win._write_recovery_snapshot(); app.processEvents()
+    if not win._recovery_path.exists():
+        raise RuntimeError('Desktop smoke test did not create an autosave recovery snapshot')
+    recovery_obj=read_project_json(win._recovery_path)
+    if not recovery_obj.get('sessions'):
+        raise RuntimeError('Desktop smoke test recovery snapshot contains no sessions')
+    logging.info('PACKAGED_DESKTOP_SMOKE_PASS version=%s plots=%s recovery=%s',PRODUCT_VERSION,rendered_plot_count,win._recovery_path)
 
 
 def main():

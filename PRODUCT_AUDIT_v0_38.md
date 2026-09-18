@@ -1,7 +1,7 @@
 # NHRA Velocity — Product Audit v0.38
 
 Date: 2026-09-16
-Baseline: v0.38.0-dev.18
+Baseline: v0.38.0-dev.28
 
 ## Executive finding
 

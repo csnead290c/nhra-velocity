@@ -12,9 +12,33 @@ if not defined TARGET (
   exit /b 1
 )
 
+rem A full Race Data corpus should contain many vendor-native logger files.
+rem Count strong/native extensions first so an accidental generic Documents
+rem folder is obvious before CSV/XLSX/ZIP files dominate the audit.
+set "NATIVE_COUNT=0"
+for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "$ext=@('.rpk','.ddf','.rcg','.ld','.dl','.dlz','.daq','.dqi','.vbo','.ftml','.ftlog','.mf4','.mdf','.xrk','.xrz','.drk','.hpl','.itlog','.emublog3','.elf','.elo','.pds','.ibt','.sd','.frd'); $n=(Get-ChildItem -LiteralPath $env:TARGET -Recurse -File -ErrorAction SilentlyContinue ^| Where-Object { $name=$_.Name.ToLowerInvariant(); $ext -contains $_.Extension.ToLowerInvariant() -or $name.EndsWith('.maxxecu-log') -or $name.EndsWith('.maxxecu-zip-log') -or $name.EndsWith('.maxxlog') }).Count; [Console]::Write($n)"`) do set "NATIVE_COUNT=%%I"
+
 echo.
 echo NHRA VELOCITY DATA AUDIT
 echo Folder: %TARGET%
+echo Strong/native logger files found: %NATIVE_COUNT%
+echo.
+if %NATIVE_COUNT% LSS 10 goto :LOW_NATIVE_WARNING
+goto :PREFLIGHT_OK
+
+:LOW_NATIVE_WARNING
+echo WARNING: This folder contains fewer than 10 strong/native logger files.
+echo For the full NHRA Race Data corpus, that usually means the wrong root
+echo was selected. Generic CSV/XLSX/ZIP files can otherwise create noise.
+echo.
+set /p "CONTINUE_LOW=Continue with this folder anyway? [y/N]: "
+if /I not "%CONTINUE_LOW%"=="Y" (
+  echo Audit cancelled. Re-run and select the intended Race Data root.
+  pause
+  exit /b 2
+)
+
+:PREFLIGHT_OK
 echo.
 set /p "MODE=Quick smoke audit [Q] or full recognized-file audit [F]? (default Q): "
 if /I "%MODE%"=="F" (
@@ -59,8 +83,7 @@ echo.
 "%PY%" -m runlab.cli racepak-ids "%TARGET%" --recursive %RACEPAK_ID_ARGS% ^
   --json-out "%OUT%\racepak_channel_ids.json" ^
   --csv-out "%OUT%\racepak_channel_ids.csv" ^
-  --descriptor-csv-out "%OUT%\racepak_descriptor_profiles.csv" ^
-  --install
+  --descriptor-csv-out "%OUT%\racepak_descriptor_profiles.csv"
 set "RPK_RC=%ERRORLEVEL%"
 if not "%RPK_RC%"=="0" (
   echo.
@@ -70,8 +93,9 @@ if not "%RPK_RC%"=="0" (
 
 echo.
 echo Audit complete.
-echo RacePak corpus evidence step completed.
-echo Empty/failed RacePak scans are NOT installed over an existing evidence library.
+echo RacePak corpus evidence report completed.
+echo IMPORTANT: Audit evidence is NOT installed automatically.
+echo Review the selected root and reports first; installation is a separate explicit step.
 echo Numeric channel-id history remains suggestion-only and is never auto-applied.
 echo Only an exact known DDF descriptor fingerprint can recover source names/units automatically.
 echo Common Channels are never assigned from corpus evidence.

@@ -186,3 +186,15 @@ The earlier persistence regression only proved that the Run→Asset row and mana
 - Added regression coverage proving cloud/on-demand source failures are classified as source availability problems rather than decoder failures.
 - Added regression coverage proving non-PKZIP `*.MaxxECU-Zip-log` samples are surfaced as format variants with header evidence instead of being silently reinterpreted.
 - Added regression coverage proving an empty RacePak census cannot overwrite a previously useful installed evidence library and that scan roots are preserved in the report.
+
+
+## dev.28 recovery durability / corpus-root validation
+
+- Complete automated source suite: **311 passed, 1 skipped**.
+- Added a headless regression contract that verifies every `runlab.project_io` helper referenced by `desktop.py` is explicitly imported, preventing the background autosave `NameError` found in the real Windows log.
+- The packaged desktop smoke scenario now forces a real recovery snapshot write/read and rejects a build whose recovery file is absent or empty. This gate will run on the user Windows machine and in packaged desktop CI where Qt is available.
+- Data-audit regression verifies the audit wrapper does **not** pass `--install`; RacePak evidence must be reviewed before runtime installation.
+- The audit wrapper now performs a native-logger preflight and warns/halts by default when fewer than 10 strong/native logger files are found, which specifically catches accidental broad folders such as generic Documents trees.
+- Native RacePak/MoTeC/MaxxECU self-test: **3/3 passed**.
+- Strict release audit with verified RSA/Tech Services SHAs: **0 errors / 0 warnings**.
+- Local Linux packaging environment does not contain PySide6, so the revised Qt desktop recovery smoke is intentionally proven again by the Windows updater before push.

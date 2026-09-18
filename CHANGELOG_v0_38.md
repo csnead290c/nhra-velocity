@@ -1,3 +1,11 @@
+## v0.38.0-dev.28 — recovery durability + corpus-root safety
+
+- Fixed the desktop autosave/recovery path by importing the persistence helpers actually used by `MainWindow`; previous development builds could analyze data normally while timed recovery snapshots failed in the background with `NameError: atomic_write_json is not defined`.
+- The real desktop smoke scenario now writes and rereads an autosave recovery snapshot, so packaged Windows/macOS builds cannot pass the release gate with a broken recovery path.
+- The data-corpus audit now performs a vendor-native file preflight. A folder with fewer than 10 strong/native logger files is treated as suspicious and requires explicit confirmation, preventing an accidental generic Documents folder from silently becoming the corpus.
+- Corpus audits no longer auto-install RacePak evidence. Evidence is generated for review first; installation is a separate explicit action after the root and results are validated.
+- Retains dev.27 source-availability and format-variant diagnostics.
+
 ## v0.38.0-dev.27 — corpus audit source-availability hardening
 
 - Distinguishes cloud/on-demand source failures from decoder failures. A Box/OneDrive placeholder that raises Windows cloud-provider errors is now reported as `source-unavailable`, not as a broken MoTeC/CSV/etc. decoder.
