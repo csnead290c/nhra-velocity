@@ -1,3 +1,12 @@
+## v0.38.0-dev.27 — corpus audit source-availability hardening
+
+- Distinguishes cloud/on-demand source failures from decoder failures. A Box/OneDrive placeholder that raises Windows cloud-provider errors is now reported as `source-unavailable`, not as a broken MoTeC/CSV/etc. decoder.
+- Records file size plus a small read-only header hex/ASCII probe in qualification output so proprietary format variants can be identified without guessing.
+- MaxxECU `*.MaxxECU-Zip-log` files that are locally readable but do not have a standard PKZIP signature are now reported as `format-variant` rather than a generic decoder failure; the raw header evidence is preserved for qualification.
+- Empty RacePak corpus scans can no longer overwrite an existing installed evidence library. The CLI reports that the empty result was not installed.
+- RacePak evidence reports now record the exact scan root(s), making it obvious whether the audit was run against the full Race Data tree or a smaller subfolder.
+- Audit wording no longer claims evidence was installed when the RacePak scan produced no usable evidence.
+
 
 ## v0.38.0-dev.26 — Windows direct-launch repair
 

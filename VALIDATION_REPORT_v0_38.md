@@ -178,3 +178,11 @@ The earlier persistence regression only proved that the Run→Asset row and mana
 - Corpus qualification now records decoder-independent integrity indicators for non-increasing time, duplicate columns, mostly-nonfinite numeric channels, and recordings dominated by constant numeric channels.
 - All-extension inventory output intentionally includes unrecognized suffixes, preventing unsupported families from disappearing merely because they are absent from the registry.
 - The read-only Box metadata survey is documented in `BOX_DATA_FORMAT_AUDIT_2026-09-17.md`. Byte-level validation of proprietary Box files remains a local/Box-synced audit step because the Box connector's advertised raw-download action returned `Tool get_download_url not found` during this validation.
+
+
+## dev.27 corpus-audit source-availability validation
+
+- Full automated suite: **308 passed, 1 skipped**.
+- Added regression coverage proving cloud/on-demand source failures are classified as source availability problems rather than decoder failures.
+- Added regression coverage proving non-PKZIP `*.MaxxECU-Zip-log` samples are surfaced as format variants with header evidence instead of being silently reinterpreted.
+- Added regression coverage proving an empty RacePak census cannot overwrite a previously useful installed evidence library and that scan roots are preserved in the report.

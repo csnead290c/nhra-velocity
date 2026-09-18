@@ -470,7 +470,8 @@ def build_channel_id_census(
     mode = str(rpk_mode or "quick").strip().lower()
     if mode not in {"none", "quick", "all"}:
         raise ValueError("rpk_mode must be one of: none, quick, all")
-    rcg_files, rpk_files, ddf_files = _corpus_files(paths, recursive)
+    roots = [Path(p) for p in paths]
+    rcg_files, rpk_files, ddf_files = _corpus_files(roots, recursive)
     if mode == "none":
         selected_rpk: list[Path] = []
     elif mode == "all":
@@ -514,6 +515,7 @@ def build_channel_id_census(
             "common_channel_assignment": "never automatic from RacePak corpus evidence",
         },
         "scan": {
+            "roots": [str(p) for p in roots],
             "recursive": bool(recursive),
             "rpk_mode": mode,
             "rcg_files_found": len(rcg_files),
@@ -574,8 +576,21 @@ def save_census(payload: Mapping[str, Any], path: str | Path) -> Path:
     return _atomic_json(Path(path), payload)
 
 
-def install_census(payload: Mapping[str, Any], path: str | Path | None = None) -> Path:
-    """Install corpus evidence used by exact-descriptor recovery and suggestions."""
+def install_census(
+    payload: Mapping[str, Any],
+    path: str | Path | None = None,
+    *,
+    allow_empty: bool = False,
+) -> Path:
+    """Install corpus evidence used by exact-descriptor recovery and suggestions.
+
+    An empty/failed scan must never erase a previously useful evidence library.
+    Callers that intentionally need to clear the library must opt in explicitly.
+    """
+    channels = payload.get("channels", []) if isinstance(payload, Mapping) else []
+    profiles = payload.get("descriptor_profiles", []) if isinstance(payload, Mapping) else []
+    if not allow_empty and not channels and not profiles:
+        raise ValueError("RacePak corpus scan produced no evidence; existing installed library was left unchanged")
     target = Path(path) if path is not None else default_library_path()
     installed = _atomic_json(target, payload)
     # A dev.22 v1 library could have allowed ID-only automatic naming.  Remove

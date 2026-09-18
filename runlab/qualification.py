@@ -40,10 +40,51 @@ class QualificationRecord:
     integrity_flags: str = ""
     warnings: str = ""
     error: str = ""
+    source_state: str = ""
+    source_error: str = ""
+    file_size_bytes: int = 0
+    header_hex: str = ""
+    header_ascii: str = ""
 
     def to_dict(self):
         return asdict(self)
 
+
+
+
+def _source_probe(path: Path, *, header_bytes: int = 32) -> dict[str, object]:
+    """Read a tiny prefix before invoking a decoder.
+
+    This distinguishes parser defects from cloud/on-demand files that are
+    visible in a synced folder but whose bytes are not currently available.
+    The probe is deliberately read-only and never requests hydration itself.
+    """
+    try:
+        size = int(path.stat().st_size)
+    except Exception:
+        size = 0
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(max(1, int(header_bytes)))
+    except Exception as exc:
+        message = str(exc)
+        lower = message.lower()
+        winerror = getattr(exc, "winerror", None)
+        if "cloud sync provider" in lower or "cloud file provider" in lower or winerror == 388:
+            state = "cloud-unavailable"
+        else:
+            state = "unreadable"
+        return {
+            "state": state,
+            "error": message,
+            "size": size,
+            "head": b"",
+        }
+    return {"state": "local-readable", "error": "", "size": size, "head": head}
+
+
+def _ascii_preview(data: bytes) -> str:
+    return "".join(chr(b) if 32 <= b <= 126 else "." for b in data)
 
 def _sha(path: Path) -> str:
     h=hashlib.sha256()
@@ -109,13 +150,32 @@ def _integrity_summary(run, report) -> dict[str, object]:
 def qualify_file(path: str | Path, *, compute_sha: bool = True) -> QualificationRecord:
     p=Path(path)
     rec=QualificationRecord(path=str(p),filename=p.name)
-    if compute_sha:
-        try: rec.sha256=_sha(p)
-        except Exception: pass
     spec=spec_for_path(p)
     if spec is not None:
         rec.format_key=spec.key
         rec.format_status=spec.status
+
+    probe = _source_probe(p)
+    rec.source_state = str(probe.get("state") or "")
+    rec.source_error = str(probe.get("error") or "")
+    rec.file_size_bytes = int(probe.get("size") or 0)
+    head = bytes(probe.get("head") or b"")
+    rec.header_hex = head.hex(" ")
+    rec.header_ascii = _ascii_preview(head)
+    if rec.source_state != "local-readable":
+        rec.status = "source-unavailable"
+        rec.error = rec.source_error
+        return rec
+
+    if compute_sha:
+        try:
+            rec.sha256=_sha(p)
+        except Exception as exc:
+            rec.source_state = "source-read-failed"
+            rec.source_error = str(exc)
+            rec.status = "source-unavailable"
+            rec.error = str(exc)
+            return rec
     try:
         run=load_telemetry(p)
         report=assess_plotability(run)
@@ -146,6 +206,16 @@ def qualify_file(path: str | Path, *, compute_sha: bool = True) -> Qualification
         rec.warnings=' | '.join(str(x) for x in run.metadata.get('data_warnings',[]) or [])
     except Exception as exc:
         rec.error=str(exc)
+        # MaxxECU "Zip-log" is a name used by the vendor, but real archives
+        # may contain variants that are not ordinary PKZIP containers. Do not
+        # guess a decoder from the extension: surface the variant and preserve
+        # its magic bytes for corpus qualification.
+        if rec.format_key == "maxxecu" and "zip" in p.name.lower() and not head.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")):
+            rec.status = "format-variant"
+            detail = "MaxxECU Zip-log filename does not contain a standard ZIP signature; native variant requires qualification"
+            rec.probe_reason = detail
+            if detail.lower() not in rec.error.lower():
+                rec.error = f"{detail}: {rec.error}" if rec.error else detail
     return rec
 
 

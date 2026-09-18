@@ -155,3 +155,23 @@ def test_conflict_on_same_exact_descriptor_fingerprint_disables_recovery(tmp_pat
     run = load_telemetry(p)
     assert "RacePak Channel 2" in run.native_channels
     assert run.metadata["ddf_corpus_exact_descriptor_bound_channels"] == 0
+
+
+def test_empty_corpus_scan_cannot_overwrite_existing_evidence_library(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("NHRA_VELOCITY_HOME", str(tmp_path / "home"))
+    defs = tmp_path / "defs"; defs.mkdir()
+    (defs / "known.rcg").write_bytes(_config(2, "ENGINE RPM"))
+    known = build_channel_id_census([defs], rpk_mode="none")
+    installed = install_census(known)
+    before = installed.read_text(encoding="utf-8")
+
+    empty_dir = tmp_path / "empty"; empty_dir.mkdir()
+    empty = build_channel_id_census([empty_dir], rpk_mode="none")
+    try:
+        install_census(empty)
+    except ValueError as exc:
+        assert "no evidence" in str(exc).lower()
+    else:
+        raise AssertionError("empty evidence library should not install without explicit opt-in")
+    assert installed.read_text(encoding="utf-8") == before
+    assert empty["scan"]["roots"] == [str(empty_dir)]

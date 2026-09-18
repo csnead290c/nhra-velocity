@@ -110,7 +110,13 @@ def cmd_qualify(args):
                 inv_frame['examples']=inv_frame['examples'].map(lambda values:' | '.join(values or []))
             inv_frame.to_csv(args.inventory_csv,index=False)
     passed=sum(1 for r in rows if r.status=='pass')
-    print(f"Qualified {len(rows)} candidate file(s): {passed} pass, {len(rows)-passed} need attention")
+    unavailable=sum(1 for r in rows if r.status=='source-unavailable')
+    variants=sum(1 for r in rows if r.status=='format-variant')
+    print(
+        f"Qualified {len(rows)} candidate file(s): {passed} pass, "
+        f"{unavailable} source-unavailable, {variants} format-variant, "
+        f"{len(rows)-passed-unavailable-variants} other need attention"
+    )
     for r in rows:
         detail=r.error[:120] or r.integrity_flags[:120]
         print(f"{r.status:22} {r.vendor:10} {r.filename}  channels={r.numeric_channels}  {detail}")
@@ -158,8 +164,12 @@ def cmd_racepak_ids(args):
                 rows.append(row)
         pd.DataFrame(rows).to_csv(args.descriptor_csv_out, index=False)
     installed = None
+    install_note = ""
     if args.install:
-        installed = install_census(payload)
+        try:
+            installed = install_census(payload)
+        except ValueError as exc:
+            install_note = str(exc)
     summary = payload.get("summary", {})
     scan = payload.get("scan", {})
     print(
@@ -172,6 +182,8 @@ def cmd_racepak_ids(args):
     if installed:
         print(f"Installed evidence library: {installed}")
         print("Numeric channel-id history will NOT rename a DDF automatically; only an exact known descriptor fingerprint may recover source names/units.")
+    elif install_note:
+        print(f"Evidence library NOT installed: {install_note}")
     warnings = payload.get("warnings", [])
     if warnings:
         print(f"Corpus-evidence warnings: {len(warnings)} (see JSON report for details)")

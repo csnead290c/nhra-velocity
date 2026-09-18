@@ -35,3 +35,30 @@ def test_qualification_adds_integrity_flags_and_sampling(tmp_path):
     assert all(row.status == 'pass' for row in rows)
     assert all(row.constant_numeric_channels >= 1 for row in rows)
     assert all('constant' not in row.integrity_flags for row in rows)
+
+
+def test_cloud_unavailable_source_is_not_misreported_as_decoder_failure(tmp_path, monkeypatch):
+    from runlab import qualification
+    p = tmp_path / 'cloud.ld'
+    p.write_bytes(b'placeholder')
+    monkeypatch.setattr(
+        qualification,
+        '_source_probe',
+        lambda path: {'state': 'cloud-unavailable', 'error': '[WinError 388] The cloud sync provider failed to perform the operation', 'size': 123, 'head': b''},
+    )
+    rec = qualification.qualify_file(p)
+    assert rec.status == 'source-unavailable'
+    assert rec.source_state == 'cloud-unavailable'
+    assert 'cloud sync provider' in rec.error.lower()
+    assert rec.numeric_channels == 0
+
+
+def test_maxxecu_zip_named_nonzip_is_reported_as_format_variant(tmp_path):
+    from runlab.qualification import qualify_file
+    p = tmp_path / 'run.MaxxECU-Zip-log'
+    p.write_bytes(b'MAXX-NATIVE-VARIANT\x00\x01\x02\x03')
+    rec = qualify_file(p, compute_sha=False)
+    assert rec.status == 'format-variant'
+    assert rec.source_state == 'local-readable'
+    assert 'does not contain a standard zip signature' in rec.error.lower()
+    assert rec.header_hex

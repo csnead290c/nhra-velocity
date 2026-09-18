@@ -70,7 +70,8 @@ if not "%RPK_RC%"=="0" (
 
 echo.
 echo Audit complete.
-echo RacePak corpus evidence was installed.
+echo RacePak corpus evidence step completed.
+echo Empty/failed RacePak scans are NOT installed over an existing evidence library.
 echo Numeric channel-id history remains suggestion-only and is never auto-applied.
 echo Only an exact known DDF descriptor fingerprint can recover source names/units automatically.
 echo Common Channels are never assigned from corpus evidence.
