@@ -1,3 +1,11 @@
+
+## v0.38.0-dev.26 — Windows direct-launch repair
+
+- Desktop shortcut now launches `pythonw.exe` directly through VBScript with a normal show state.
+- Removed the hidden `cmd.exe` parent from normal startup; it could propagate a hidden startup state to Qt, making VELOCITY appear not to launch even while the process started.
+- The VBS launcher now logs direct-launch start/exit status and accepts arguments so the updater can exercise the same launcher chain with `--smoke-test`.
+- The legacy CMD launcher is now only a compatibility wrapper; normal startup remains offline-first and performs no Git/pip/update work.
+
 # NHRA Velocity v0.38 development
 
 ## v0.38.0-dev.24

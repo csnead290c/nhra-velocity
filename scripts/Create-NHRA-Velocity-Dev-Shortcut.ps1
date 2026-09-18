@@ -21,7 +21,7 @@ $s = $ws.CreateShortcut($ShortcutPath)
 $s.TargetPath = "$env:SystemRoot\System32\wscript.exe"
 $s.Arguments = '"' + $launcher + '"'
 $s.WorkingDirectory = $Base
-$s.Description = 'NHRA Velocity development build - hidden auto-update launcher'
+$s.Description = 'NHRA Velocity development build'
 if (Test-Path $icon) { $s.IconLocation = "$icon,0" }
 $s.Save()
 Write-Host "Desktop shortcut created: $ShortcutPath"
