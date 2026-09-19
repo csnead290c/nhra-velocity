@@ -266,6 +266,29 @@ def test_telemetry_sync_cannot_overwrite_official_timing(tmp_path):
     assert np.isclose(rec['timing']['quarter_mile_s'],6.812)
 
 
+def test_sync_run_state_skips_missing_catalog_run_once(tmp_path,caplog):
+    """A restored session may reference a catalog Run absent from the active
+    catalog (recovery under a different NHRA_VELOCITY_HOME, deleted mirror).
+    The sync must skip only the missing-run write, create no phantom Run and
+    not re-log on every autosave tick."""
+    from runlab.catalog_bridge import sync_run_state, _MISSING_RUN_SYNC_LOGGED
+    _MISSING_RUN_SYNC_LOGGED.clear()
+    c=_catalog(tmp_path)
+    run=_run()
+    with caplog.at_level('INFO'):
+        sync_run_state(c,'run_missing_from_catalog',run)
+        sync_run_state(c,'run_missing_from_catalog',run)
+    assert c.get_run('run_missing_from_catalog') is None
+    assert c.stats()['runs']==0
+    messages=[r for r in caplog.records if 'run_missing_from_catalog' in r.getMessage()]
+    assert len(messages)==1
+    # An existing run still syncs normally after the missing-run skip.
+    event=c.create_event('Event',season=2026,event_code='E1')
+    rid=c.create_run(event_id=event,run_key='E1-Q1')
+    sync_run_state(c,rid,run)
+    assert c.get_run(rid) is not None
+
+
 
 def test_catalog_v1_schema_migrates_to_v7_without_losing_run(tmp_path):
     import sqlite3

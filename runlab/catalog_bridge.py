@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, Tuple
+import logging
 import math
 import numpy as np
 
@@ -120,7 +121,22 @@ def register_opened_telemetry(
     return run_id,asset_id,session_id
 
 
+# Run ids already reported as missing, so a dangling restored-session
+# reference cannot spam the log on every autosave/project-save tick.
+_MISSING_RUN_SYNC_LOGGED: set[str] = set()
+
+
 def sync_run_state(catalog: LocalCatalog, run_id: str, run: TelemetryRun) -> None:
+    # A session restored from a recovery/workbook may reference a catalog Run
+    # that is not present in the active catalog (different NHRA_VELOCITY_HOME,
+    # deleted mirror, etc.).  Skip only the catalog-state synchronization that
+    # requires that Run: the in-memory session stays usable, no phantom Run is
+    # created, and the identity is never reinterpreted.
+    if catalog.get_run(run_id) is None:
+        if run_id not in _MISSING_RUN_SYNC_LOGGED:
+            _MISSING_RUN_SYNC_LOGGED.add(run_id)
+            logging.info("Catalog state sync skipped: run %s is not present in the active catalog", run_id)
+        return
     # Logger/session state may contain useful timing or weather, but it must not
     # silently replace authoritative official values already attached to the
     # canonical NHRA Run.  Only persist timing when at least one timing value is
