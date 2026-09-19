@@ -62,16 +62,30 @@ def test_recovery_source_prefers_new_then_legacy_then_none(tmp_path, monkeypatch
     assert recovery_source_path(new, legacy) == new
 
 
+def _isolate_platform_roots(monkeypatch, tmp_path):
+    """Redirect every platform-specific state root under tmp_path.
+
+    legacy_recovery_path()/app_data_root() resolve LOCALAPPDATA/APPDATA on
+    Windows, XDG_DATA_HOME/XDG_STATE_HOME on Linux, and Path.home() on macOS,
+    so all of them must be redirected for a test to stay inside tmp_path on
+    every CI platform.
+    """
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local_app_data"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "app_data"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg_data"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg_state"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+
 def test_recovery_source_never_leaves_isolated_home(tmp_path, monkeypatch):
     """NHRA_VELOCITY_HOME alone is a hard state sandbox: the legacy
     QStandardPaths location is never consulted, even when a real legacy
     snapshot exists. No LOCALAPPDATA redirection is required for isolation."""
     monkeypatch.setenv("NHRA_VELOCITY_HOME", str(tmp_path / "velocity_home"))
     # A simulated 'real' user profile containing a valid legacy snapshot.
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local_app_data"))
-    monkeypatch.setenv("APPDATA", str(tmp_path / "app_data"))
+    _isolate_platform_roots(monkeypatch, tmp_path)
     legacy = legacy_recovery_path()
-    legacy.parent.mkdir(parents=True)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(legacy, {"sessions": [{"path": "real_user_run.rpk"}]})
 
     # Canonical location empty: the legacy file must NOT be selected or read.
@@ -90,11 +104,10 @@ def test_recovery_source_legacy_fallback_when_unset(tmp_path, monkeypatch):
     absent, and source selection never deletes or modifies either file."""
     monkeypatch.delenv("NHRA_VELOCITY_HOME", raising=False)
     monkeypatch.delenv("NHRA_TECH_DATA_HOME", raising=False)
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local_app_data"))
-    monkeypatch.setenv("APPDATA", str(tmp_path / "app_data"))
+    _isolate_platform_roots(monkeypatch, tmp_path)
 
     legacy = legacy_recovery_path()
-    legacy.parent.mkdir(parents=True)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_json(legacy, {"sessions": [{"path": "legacy_run.rpk"}]})
     legacy_payload = legacy.read_bytes()
 
@@ -114,9 +127,7 @@ def test_recovery_write_never_touches_legacy_location(tmp_path, monkeypatch):
     """Isolated-state contract: a recovery write under NHRA_VELOCITY_HOME must
     not create or modify the legacy QStandardPaths recovery file."""
     monkeypatch.setenv("NHRA_VELOCITY_HOME", str(tmp_path / "velocity_home"))
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local_app_data"))
-    monkeypatch.setenv("APPDATA", str(tmp_path / "app_data"))
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg_data"))
+    _isolate_platform_roots(monkeypatch, tmp_path)
     target = recovery_path()
     legacy = legacy_recovery_path()
     assert target != legacy
