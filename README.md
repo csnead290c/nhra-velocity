@@ -162,8 +162,10 @@ See `ARCHITECTURE.md`, `DATA_MODEL.md`, `ANALYSIS_CASES.md`, and `SYNC_CONTRACT_
 
 ### Windows
 
-1. Run `setup_windows.bat` once.
-2. Run `run_windows.bat`.
+1. Run `setup_windows.bat` once. It creates the repo-local `.venv` environment and installs the desktop dependencies there.
+2. Run `run_windows.bat`. It launches the app with `.venv\Scripts\python.exe`. `test_windows.bat` runs the automated suite from the same `.venv`.
+
+Source runs enforce NHRA Tech Services sign-in by default, like packaged builds. For local development and automated testing without an account, set `NHRA_TECH_DEV_UNAUTHENTICATED=1` — a development/test-only opt-out that must never ship in distributed builds.
 
 For a self-contained executable, run `build_windows_exe.bat` on Windows with Python installed. Frozen builds require Tech Services authorization by default. The build script can Authenticode-sign the executable when the NHRA signing certificate/timestamp environment variables are configured; development packaging can explicitly opt out of auth with `NHRA_TECH_DEV_UNAUTHENTICATED=1`.
 

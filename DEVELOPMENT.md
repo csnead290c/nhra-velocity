@@ -16,6 +16,12 @@ Do not maintain long-lived parallel product forks. Experimental work belongs in 
 
 Prefer small, explainable commits with conventional prefixes (`feat:`, `fix:`, `perf:`, `test:`, `docs:`, `build:`, `refactor:`). Never commit team/customer race data, credentials, signing keys, database dumps or downloaded Box files. The `.gitignore` intentionally blocks common motorsports logger formats outside the synthetic `examples/` corpus.
 
+## Local development environment
+
+Windows development uses a repo-local `.venv`: `setup_windows.bat` creates it and installs `requirements-desktop.txt`, `run_windows.bat` launches the desktop through it, and `test_windows.bat` runs the suite from it. Setup is idempotent — rerun it any time dependencies change.
+
+Source runs enforce NHRA Tech Services sign-in by default. `NHRA_TECH_DEV_UNAUTHENTICATED=1` is a **local development/test-only** opt-out; it must not be set for distributed builds or shared machines. Test and tooling runs should also set `NHRA_VELOCITY_HOME` to an isolated directory so they never touch real user state.
+
 ## Validation before merge
 
 Run:

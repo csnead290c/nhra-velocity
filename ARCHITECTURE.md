@@ -47,7 +47,7 @@ A Run owns its permanent Asset list. An Asset's filename is metadata only. The R
 
 `remote_entities` retains server→local identity/revision mappings and `sync_cursors` supports incremental catalog pulls. These are synchronization mechanics, not evidence-matching concepts.
 
-## 3. Local catalog schema v7
+## 3. Local catalog schema v9
 
 Core objects:
 
@@ -72,7 +72,7 @@ Core objects:
 
 Schema v6 generalizes incident work into reusable multi-Run AnalysisCases and allows ModelSnapshots to be Run-scoped or case-scoped. Existing v0.17 IncidentCase rows and Run ModelSnapshots migrate forward without deletion.
 
-A fresh v0.33 catalog still uses schema v7 and does **not** create repository-discovery or reconciliation tables. v0.23 extends portable workstation definitions/reporting without changing persistent catalog schema. Older migrated SQLite files may physically retain legacy tables after migration, but current runtime code does not use those discovery concepts.
+The catalog is now schema v9 (`telemetry_sessions.settings_json` was added in v9 for durable per-data-log Common Channel/unit settings) and does **not** create repository-discovery or reconciliation tables. v0.23 extends portable workstation definitions/reporting without changing persistent catalog schema. Older migrated SQLite files may physically retain legacy tables after migration, but current runtime code does not use those discovery concepts.
 
 ## 4. Server asset lifecycle
 

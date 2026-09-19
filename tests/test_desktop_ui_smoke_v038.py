@@ -188,3 +188,27 @@ def test_grouped_channels_share_only_explicit_same_unit_axis():
     wave.layout_mode.setCurrentText('Grouped Channels');wave.refresh();app.processEvents()
     assert len(wave._plots)==2
     assert any(set(chans)=={'RPM','Driveshaft'} for _plot,_header,chans in wave._plot_headers)
+
+
+def test_recovery_snapshot_writes_only_inside_isolated_home(tmp_path, monkeypatch):
+    """The desktop autosave must follow NHRA_VELOCITY_HOME and must never
+    write into the legacy QStandardPaths/user state directory."""
+    from desktop import MainWindow
+    from runlab.project_io import legacy_recovery_path, RECOVERY_FILENAME
+
+    monkeypatch.setenv("NHRA_VELOCITY_HOME", str(tmp_path / "velocity_home"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local_app_data"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "app_data"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg_data"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg_state"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    win = MainWindow()
+    win.store.add("isolated.csv", _run("isolated"), activate=True)
+    win._write_recovery_snapshot()
+
+    expected = tmp_path / "velocity_home" / RECOVERY_FILENAME
+    assert win._recovery_path == expected
+    assert expected.exists()
+    assert not legacy_recovery_path().exists()
+    win.close()

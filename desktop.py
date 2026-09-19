@@ -48,7 +48,10 @@ except ImportError as exc:  # pragma: no cover - environment dependent
 
 from runlab.branding import PRODUCT_NAME, PRODUCT_TAGLINE, PRODUCT_VERSION
 from runlab.product_manifest import WORKBOOK_FORMAT_VERSION
-from runlab.project_io import atomic_write_json, read_project_json, is_recovery_newer, projects_equivalent
+from runlab.project_io import (
+    atomic_write_json, read_project_json, is_recovery_newer, projects_equivalent,
+    recovery_path, legacy_recovery_path, recovery_source_path,
+)
 from runlab.importers import load_telemetry, apply_channel_overrides, auto_map_channels, CANONICAL_CHANNELS, telemetry_file_candidate
 from runlab.import_registry import qt_file_dialog_filter
 from runlab.models import TelemetryRun, Environment, TimingData
@@ -4010,10 +4013,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.store.changed.connect(self._refresh_session_selectors)
         self._refresh_session_selectors()
         self.statusBar().showMessage('Open a data log to begin. Ctrl+O')
-        # Recovery snapshots are deliberately separate from user project files.
-        autosave_root=Path(QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.AppLocalDataLocation) or str(Path.home()/'.nhra-velocity'))
-        autosave_root.mkdir(parents=True,exist_ok=True)
-        self._recovery_path=autosave_root/'autosave-recovery.nhratech'
+        # Recovery snapshots are deliberately separate from user project files,
+        # but live under the same unified app-data root so NHRA_VELOCITY_HOME
+        # isolation covers them.  A legacy QStandardPaths snapshot remains a
+        # read-only fallback for existing installs; new writes never go there.
+        self._recovery_path=recovery_path()
+        self._legacy_recovery_path=legacy_recovery_path(APP_ORG,APP_ID)
         self._autosave_timer=QtCore.QTimer(self); self._autosave_timer.setInterval(90_000)
         self._autosave_timer.timeout.connect(self._write_recovery_snapshot); self._autosave_timer.start()
         QtCore.QTimer.singleShot(0,self._offer_recovery)
@@ -6925,12 +6930,15 @@ class MainWindow(QtWidgets.QMainWindow):
             logging.exception('Autosave recovery snapshot failed')
 
     def _offer_recovery(self):
-        if not getattr(self,'_recovery_path',None) or not self._recovery_path.exists():
+        if not getattr(self,'_recovery_path',None):
+            return
+        source_file=recovery_source_path(self._recovery_path,self._legacy_recovery_path)
+        if source_file is None:
             return
         try:
-            obj=read_project_json(self._recovery_path)
+            obj=read_project_json(source_file)
             source=obj.get('source_project_path')
-            if not is_recovery_newer(self._recovery_path,source):
+            if not is_recovery_newer(source_file,source):
                 return
         except Exception:
             logging.exception('Could not inspect autosave recovery file')
@@ -6941,8 +6949,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self._recover_snapshot(force=True)
 
     def _recover_snapshot(self, force=False):
-        path=getattr(self,'_recovery_path',None)
-        if not path or not Path(path).exists():
+        path=None
+        if getattr(self,'_recovery_path',None):
+            path=recovery_source_path(self._recovery_path,self._legacy_recovery_path)
+        if path is None:
             if force: QtWidgets.QMessageBox.information(self,'No recovery snapshot','No autosave recovery snapshot is available.')
             return
         try:
