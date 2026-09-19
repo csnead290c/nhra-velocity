@@ -17,6 +17,7 @@ import sys
 import logging
 import traceback
 import subprocess
+import threading
 import time
 import faulthandler
 from datetime import date
@@ -279,6 +280,58 @@ class TechServicesSeasonSyncWorker(QtCore.QObject):
         except Exception as exc:
             logging.exception('Background Tech Services metadata sync failed')
             self.failed.emit(str(exc))
+
+
+class TelemetryDecodeWorker(QtCore.QObject):
+    """Sequential telemetry decode for the normal Open Data Log(s) path.
+
+    The worker runs load_telemetry() off the GUI thread only.  It never
+    touches Qt widgets, SessionStore, preferences or the catalog; decoded
+    results return to the GUI thread through queued signals carrying the
+    owning job id so stale deliveries can be rejected safely.
+    """
+
+    decoded = QtCore.Signal(int, str, object)   # job_id, path, TelemetryRun
+    failed = QtCore.Signal(int, str, str)       # job_id, path, message
+    progress = QtCore.Signal(int, int, str)     # index, total, filename
+    finished = QtCore.Signal(int)               # job_id
+
+    def __init__(self, job_id: int, paths: List[str]):
+        super().__init__()
+        self._job_id = int(job_id)
+        self._paths = list(paths)
+        # threading.Event is the cross-thread cancellation primitive; a plain
+        # attribute would rely on unsynchronized visibility between threads.
+        self._cancel = threading.Event()
+
+    @QtCore.Slot()
+    def cancel(self):
+        self._cancel.set()
+
+    def is_cancelled(self) -> bool:
+        return self._cancel.is_set()
+
+    @QtCore.Slot()
+    def run(self):
+        total = len(self._paths)
+        for index, path in enumerate(self._paths, start=1):
+            if self._cancel.is_set():
+                break
+            self.progress.emit(index, total, Path(path).name)
+            try:
+                run = load_telemetry(path)
+            except Exception as exc:
+                logging.exception('Telemetry import failed: %s', path)
+                if not self._cancel.is_set():
+                    self.failed.emit(self._job_id, path, str(exc))
+                continue
+            # Decoders cannot be interrupted mid-parse.  If cancel landed
+            # during this decode, the finished result is discarded here and
+            # never reaches SessionStore.
+            if self._cancel.is_set():
+                break
+            self.decoded.emit(self._job_id, path, run)
+        self.finished.emit(self._job_id)
 
 
 class SessionStore(QtCore.QObject):
@@ -3993,6 +4046,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._tech_sync_thread=None
         self._tech_sync_worker=None
         self._tech_sync_user_initiated=False
+        # Normal Open Data Log(s) decode job. At most one job may run at a
+        # time; a second open request while busy is rejected, not queued or
+        # silently substituted.
+        self._open_job_id=0
+        self._open_thread=None
+        self._open_worker=None
+        self._open_errors=[]
+        self._open_added=0
+        self._open_progress=None
+        self._open_cancelled=False
+        self._open_pending_close=False
         self.simulation_studies=[]
         self.compare_sets=CompareSetLibrary()
         self.store=SessionStore(); self.store.catalog=self.catalog; self.cursors=CursorBus(); self.project_path:Optional[str]=None
@@ -6719,34 +6783,117 @@ class MainWindow(QtWidgets.QMainWindow):
     def _open_paths(self, paths):
         files=[str(Path(p)) for p in paths if p and Path(p).is_file()]
         if not files:return
-        errors=[]; opened=0
-        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
-        try:
-            for path in files:
-                try:
-                    # Every explicitly opened log becomes the active/Main session
-                    # as it is decoded. This guarantees the final selected file is
-                    # the one visible on the primary waveform.
-                    run=load_telemetry(path)
-                    h=self.store.add(path,run,activate=True)
-                    # Direct file opens are scratch sessions only. Permanent Run→Asset
-                    # ownership comes exclusively from NHRA Tech Services.
-                    opened+=1
-                except Exception as exc:
-                    logging.exception('Telemetry import failed: %s', path)
-                    errors.append(f'{Path(path).name}: {exc}')
-        finally:
-            QtWidgets.QApplication.restoreOverrideCursor()
+        if self._open_worker is not None:
+            # The synchronous version effectively serialized opens by blocking
+            # the GUI; preserve that by refusing to start a second job rather
+            # than silently superseding the running one.
+            self.statusBar().showMessage('Data logs are currently loading. Finish or cancel that operation first.',5000)
+            return
+        self._open_job_id+=1
+        job_id=self._open_job_id
+        self._open_errors=[]; self._open_added=0; self._open_cancelled=False
+        thread=QtCore.QThread(self)
+        worker=TelemetryDecodeWorker(job_id,files)
+        worker.moveToThread(thread)
+        self._open_thread=thread; self._open_worker=worker
+        worker.decoded.connect(self._open_decoded)
+        worker.failed.connect(self._open_failed)
+        worker.progress.connect(self._open_progress_update)
+        worker.finished.connect(self._open_finished)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._open_thread_finished)
+        thread.started.connect(worker.run)
+        # Non-modal, file-level progress only. Decoders cannot report
+        # intra-file percentages, so none are invented; Cancel marks the job
+        # and the in-flight decode is allowed to finish naturally.
+        dlg=QtWidgets.QProgressDialog('Preparing to decode data logs…','Cancel',0,len(files),self)
+        dlg.setWindowTitle('Opening data logs')
+        dlg.setWindowModality(QtCore.Qt.NonModal)
+        dlg.setMinimumDuration(400)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setValue(0)
+        dlg.canceled.connect(self._open_mark_cancelled)
+        self._open_progress=dlg
+        self.statusBar().showMessage(f'Decoding {len(files)} data log(s)…')
+        thread.start()
+
+    def _open_mark_cancelled(self):
+        self._open_cancelled=True
+        if self._open_worker is not None:
+            # Direct call — sets the threading.Event synchronously. A queued
+            # slot connection would not run until the worker's run() returned,
+            # which would make cancellation a no-op mid-decode.
+            self._open_worker.cancel()
+        dlg=self._open_progress
+        if dlg is not None:
+            try:dlg.setLabelText('Cancelling… finishing current file')
+            except Exception:pass
+
+    def _open_job_accepts_results(self, job_id: int) -> bool:
+        """A decoded/failed result may mutate the session only when it belongs
+        to the current job and cancellation has not been requested — this is
+        the GUI-side check that closes the race around decoded.emit()."""
+        return (job_id==self._open_job_id and self._open_worker is not None
+                and not self._open_cancelled)
+
+    @QtCore.Slot(int,str,object)
+    def _open_decoded(self, job_id, path, run):
+        if not self._open_job_accepts_results(job_id):return
+        # Every explicitly opened log becomes the active/Main session as it is
+        # decoded, so the final selected file ends visible on the primary
+        # waveform. Direct file opens are scratch sessions only; permanent
+        # Run→Asset ownership comes exclusively from NHRA Tech Services.
+        self.store.add(path,run,activate=True)
+        self._open_added+=1
+
+    @QtCore.Slot(int,str,str)
+    def _open_failed(self, job_id, path, message):
+        if not self._open_job_accepts_results(job_id):return
+        self._open_errors.append(f'{Path(path).name}: {message}')
+
+    @QtCore.Slot(int,int,str)
+    def _open_progress_update(self,index,total,name):
+        dlg=self._open_progress
+        if dlg is not None and not dlg.wasCanceled():
+            dlg.setLabelText(f'Decoding {index} of {total} — {name}')
+            dlg.setValue(index-1)
+        self.statusBar().showMessage(f'Decoding {index} of {total} — {name}')
+
+    @QtCore.Slot(int)
+    def _open_finished(self, job_id):
+        if job_id!=self._open_job_id:return
+        dlg=self._open_progress; self._open_progress=None
+        if dlg is not None:
+            try:
+                dlg.reset(); dlg.close(); dlg.deleteLater()
+            except Exception:pass
+        added=self._open_added; errors=list(self._open_errors)
+        self._open_added=0; self._open_errors=[]
+        # During a deferred window close, surface no dialogs or summary —
+        # the close retry completes the shutdown instead.
+        if self._open_pending_close:return
         if errors:
-            title='Log import failed' if not opened else 'Some logs could not be opened'
+            title='Log import failed' if not added else 'Some logs could not be opened'
             detail='\n\n'.join(errors)
             detail+='\n\nRaw data is never silently treated as CSV when the file appears binary. The message above identifies the decoder stage that failed.'
             QtWidgets.QMessageBox.warning(self,title,detail)
-        if opened:
+        if added:
             h=self.store.active
             if h:
                 report=assess_plotability(h.run)
-                self.statusBar().showMessage(f'Opened {opened} log(s) — {Path(h.path).name} — {len(report.default_channels)} default trace(s) selected',8000)
+                self.statusBar().showMessage(f'Opened {added} log(s) — {Path(h.path).name} — {len(report.default_channels)} default trace(s) selected',8000)
+        elif self._open_cancelled:
+            self.statusBar().showMessage('Data log loading cancelled.',5000)
+
+    @QtCore.Slot()
+    def _open_thread_finished(self):
+        self._open_thread=None; self._open_worker=None
+        if self._open_pending_close:
+            self._open_pending_close=False
+            self.close()
 
     def open_logs(self):
         files,_=QtWidgets.QFileDialog.getOpenFileNames(self,'Open data logs','', qt_file_dialog_filter())
@@ -7082,6 +7229,17 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self,'Project open failed',str(exc))
 
     def closeEvent(self,event):
+        if self._open_worker is not None:
+            # A decode job is in flight. Request cancellation and defer the
+            # close until the current load_telemetry() returns naturally —
+            # never terminate() the QThread and never block the GUI thread in
+            # thread.wait(). _open_thread_finished retries close() once the
+            # worker has cleanly stopped.
+            self._open_pending_close=True
+            self._open_mark_cancelled()
+            self.statusBar().showMessage('Finishing current decode before closing…',5000)
+            event.ignore()
+            return
         # Recovery is for abnormal termination. A clean shutdown removes the
         # snapshot so the next launch is not asked to recover a session that
         # was intentionally closed.
@@ -7259,7 +7417,9 @@ def main():
             QtCore.QTimer.singleShot(250,win._maybe_start_initial_sync)
             if len(sys.argv)>1:
                 paths=[p for p in sys.argv[1:] if p != '--smoke-test' and Path(p).is_file()]
-                win._open_paths(paths)
+                # Decoding is asynchronous now; schedule the open after the
+                # event loop starts so worker results are delivered normally.
+                QtCore.QTimer.singleShot(0,lambda paths=paths: win._open_paths(paths))
         return app.exec()
     except Exception:
         exc_type,exc_value,exc_tb=sys.exc_info()
