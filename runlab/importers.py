@@ -221,13 +221,24 @@ def _detect_delimiter(lines: List[str]) -> str:
 
 def _find_header_line(lines: List[str], delimiter: str) -> int:
     best_idx, best_score = 0, -1.0
+    # Normalized canonical synonyms and per-cell labels are loop invariants.
+    # Computing them inside the cell loop made header detection cost
+    # lines x columns x synonyms regex calls even on small files.
+    normalized_synonyms = tuple(
+        _norm(synonym)
+        for vals in CANONICAL_CHANNELS.values()
+        for synonym in vals
+    )
     for i, line in enumerate(lines[:80]):
         parts = [p.strip().strip('"') for p in line.split(delimiter)]
         if len(parts) < 2:
             continue
         alpha = sum(bool(re.search(r"[A-Za-z]", p)) for p in parts)
         numeric = sum(_is_number(p) for p in parts)
-        known = sum(any(_norm(s) in _norm(p) for vals in CANONICAL_CHANNELS.values() for s in vals) for p in parts)
+        known = sum(
+            any(ns in np for ns in normalized_synonyms)
+            for np in (_norm(p) for p in parts)
+        )
         # Headers tend to be alpha-heavy and followed by numeric rows.
         next_numeric = 0
         if i + 1 < len(lines):
