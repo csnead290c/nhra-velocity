@@ -118,7 +118,7 @@ v0.25 introduces an in-memory authenticated identity/session boundary for the de
 
 ## SimulationStudyDefinition / SimulationStudyPackage (derived engineering state)
 
-A `SimulationStudyDefinition` stores the forward-study solver and parameter axes. A `.nhrastudy` `SimulationStudyPackage` adds the exact baseline vehicle/dyno, environment, source Run identity, software version, creation time and result rows. Workbook format v7 can retain study packages/definitions for repeatable local engineering work. These remain derived model evidence; the server's Event/Run/Asset schema stays authoritative and local catalog schema remains v7.
+A `SimulationStudyDefinition` stores the forward-study solver and parameter axes. A `.nhrastudy` `SimulationStudyPackage` adds the exact baseline vehicle/dyno, environment, source Run identity, software version, creation time and result rows. Workbook format v7 can retain study packages/definitions for repeatable local engineering work. These remain derived model evidence; the server's Event/Run/Asset schema stays authoritative; these study rows add no new catalog tables (schema v9).
 
 
 ## StripAnalysisResult (derived, not persisted)
@@ -130,4 +130,4 @@ v0.26 adds a derived downtrack analysis object containing a distance grid, obser
 
 A `FitEvidencePolicy` is a portable derived-analysis definition attached to an inverse-fit invocation, not authoritative Run data. It defines telemetry domain (`time` or `distance`), official timing weights, telemetry-channel weights, engineering uncertainty scales, maximum residual samples, distance-grid step, and optional weighted `FitDistanceWindow` ranges.
 
-When an inference result is promoted to a ModelSnapshot, the snapshot input bundle records the evidence policy together with selected unknowns and nuisance terms. This allows later review of exactly which measurements could influence the fit. Catalog schema remains v7.
+When an inference result is promoted to a ModelSnapshot, the snapshot input bundle records the evidence policy together with selected unknowns and nuisance terms. This allows later review of exactly which measurements could influence the fit. This adds no new catalog tables (schema v9).

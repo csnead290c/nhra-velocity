@@ -52,10 +52,9 @@ The workstation scope names remain a client-side product boundary; the audited w
 
 `runlab.security.desktop_auth_required()` applies the release policy:
 
-- source/development execution: authentication is not forced while the live adapter is still unbound;
-- frozen/distributed executable: authentication is required by default;
+- source and frozen execution both require authentication by default;
 - a protected build with no validated online session or signed unexpired offline entitlement **fails closed**;
-- CI/development packaging can explicitly set `NHRA_TECH_DEV_UNAUTHENTICATED=1`; that override must not be used in production distribution.
+- CI/development can explicitly set `NHRA_TECH_DEV_UNAUTHENTICATED=1` as a local-only opt-out; that override must not be used in production distribution.
 
 This prevents a future release from accidentally becoming a permanent guest-capable engineering application.
 
