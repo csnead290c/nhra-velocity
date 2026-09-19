@@ -45,7 +45,12 @@ def test_recovery_path_follows_isolated_app_data_root(tmp_path, monkeypatch):
     assert recovery_path() == tmp_path / "velocity_home" / RECOVERY_FILENAME
 
 
-def test_recovery_source_prefers_new_then_legacy_then_none(tmp_path):
+def test_recovery_source_prefers_new_then_legacy_then_none(tmp_path, monkeypatch):
+    # Fallback ordering is exercised with no explicit state home configured;
+    # deleting the vars also keeps this test deterministic on machines that
+    # happen to export NHRA_VELOCITY_HOME in their environment.
+    monkeypatch.delenv("NHRA_VELOCITY_HOME", raising=False)
+    monkeypatch.delenv("NHRA_TECH_DATA_HOME", raising=False)
     new = tmp_path / "new" / RECOVERY_FILENAME
     legacy = tmp_path / "legacy" / RECOVERY_FILENAME
     assert recovery_source_path(new, legacy) is None
@@ -55,6 +60,54 @@ def test_recovery_source_prefers_new_then_legacy_then_none(tmp_path):
     new.parent.mkdir(parents=True)
     atomic_write_json(new, {"sessions": []})
     assert recovery_source_path(new, legacy) == new
+
+
+def test_recovery_source_never_leaves_isolated_home(tmp_path, monkeypatch):
+    """NHRA_VELOCITY_HOME alone is a hard state sandbox: the legacy
+    QStandardPaths location is never consulted, even when a real legacy
+    snapshot exists. No LOCALAPPDATA redirection is required for isolation."""
+    monkeypatch.setenv("NHRA_VELOCITY_HOME", str(tmp_path / "velocity_home"))
+    # A simulated 'real' user profile containing a valid legacy snapshot.
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local_app_data"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "app_data"))
+    legacy = legacy_recovery_path()
+    legacy.parent.mkdir(parents=True)
+    atomic_write_json(legacy, {"sessions": [{"path": "real_user_run.rpk"}]})
+
+    # Canonical location empty: the legacy file must NOT be selected or read.
+    assert recovery_source_path() is None
+
+    # A snapshot inside the isolated home is selected normally.
+    canonical = recovery_path()
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(canonical, {"sessions": [{"path": "isolated_run.rpk"}]})
+    assert recovery_source_path() == canonical
+
+
+def test_recovery_source_legacy_fallback_when_unset(tmp_path, monkeypatch):
+    """Normal production mode (no explicit state home): the canonical
+    location wins when present, the legacy location is consulted when it is
+    absent, and source selection never deletes or modifies either file."""
+    monkeypatch.delenv("NHRA_VELOCITY_HOME", raising=False)
+    monkeypatch.delenv("NHRA_TECH_DATA_HOME", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local_app_data"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "app_data"))
+
+    legacy = legacy_recovery_path()
+    legacy.parent.mkdir(parents=True)
+    atomic_write_json(legacy, {"sessions": [{"path": "legacy_run.rpk"}]})
+    legacy_payload = legacy.read_bytes()
+
+    assert recovery_source_path() == legacy
+    # Selection is read-only: the legacy file is untouched.
+    assert legacy.read_bytes() == legacy_payload
+
+    canonical = recovery_path()
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(canonical, {"sessions": [{"path": "canonical_run.rpk"}]})
+    assert recovery_source_path() == canonical
+    # Canonical winning must not disturb the legacy snapshot either.
+    assert legacy.exists() and legacy.read_bytes() == legacy_payload
 
 
 def test_recovery_write_never_touches_legacy_location(tmp_path, monkeypatch):

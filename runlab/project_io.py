@@ -56,10 +56,17 @@ def recovery_source_path(
     The unified app-data-root location always wins.  A legacy snapshot is only
     used when no new-location file exists, so existing users keep one
     recovery chance without the application migrating or deleting anything.
+
+    An explicitly configured NHRA_VELOCITY_HOME/NHRA_TECH_DATA_HOME is a hard
+    application-state sandbox: the legacy QStandardPaths location in the real
+    user profile is never consulted, so isolated environments need no further
+    OS-directory redirection to be fully self-contained.
     """
     new = Path(new_path) if new_path is not None else recovery_path()
     if new.exists():
         return new
+    if os.environ.get("NHRA_VELOCITY_HOME") or os.environ.get("NHRA_TECH_DATA_HOME"):
+        return None
     legacy = Path(legacy_path) if legacy_path is not None else legacy_recovery_path()
     if legacy.exists():
         return legacy
