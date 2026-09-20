@@ -101,7 +101,7 @@ from runlab.sync_engine import apply_tech_services_snapshot
 from runlab.time_mapping import TimeAnchor, fit_time_mapping
 from runlab.case_timeline import CaseTimeAnchor, fit_case_run_alignment, store_case_run_alignment, composed_mapping_for_asset
 from runlab.case_playback import CasePlaybackController, case_playback_frame, sample_telemetry_at_asset_time
-from runlab.workstation import channel_catalog, set_channel_alias, gates, GateDefinition, save_gate, evaluate_gate, MetricDefinition, drag_metric_report
+from runlab.workstation import channel_catalog, set_channel_alias, gates, GateDefinition, save_gate, evaluate_gate, MetricDefinition, drag_metric_report, resolve_channel
 from runlab.common_channels import common_channel_specs, common_channel_label
 from runlab.racepak_config_profiles import (
     matching_profile as matching_racepak_config_profile,
@@ -1442,6 +1442,17 @@ class WaveformDisplay(QtWidgets.QWidget):
         self._lines: List[Tuple[Any, Any, Any]] = []
         self._reference_regions: List[Any] = []
         self._plot_headers: List[Tuple[Any, Any, List[str]]] = []
+        # Incremental-refresh bookkeeping.  _curve_slots records the logical
+        # slot each rendered curve occupies: (plot, channel, overlay index,
+        # curve).  _event_items tracks event/annotation graphics so they can be
+        # rebuilt without touching the plot/curve scene.  The signature fields
+        # describe scene SHAPE (never RunHandle identity) and decide whether
+        # the next refresh may reuse the scene.
+        self._curve_slots: List[Tuple[Any, str, int, Any]] = []
+        self._event_items: List[Tuple[Any, Any]] = []
+        self._sig_struct: Optional[tuple] = None
+        self._sig_pattern: Optional[tuple] = None
+        self._rendered_run_id: Optional[int] = None
         self._waveform_shortcuts: List[Any] = []
         self._syncing = False
         self._range_history: List[Tuple[float,float]] = []
@@ -2105,7 +2116,12 @@ class WaveformDisplay(QtWidgets.QWidget):
         help_text=QtWidgets.QLabel('The render point budget controls peak-preserving display decimation only. Raw logger samples remain unchanged.'); help_text.setWordWrap(True); form.addRow(help_text)
         buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok|QtWidgets.QDialogButtonBox.Cancel); buttons.accepted.connect(dlg.accept); buttons.rejected.connect(dlg.reject); form.addRow(buttons)
         if dlg.exec()!=QtWidgets.QDialog.Accepted:return
-        self.layout_mode.setCurrentText(layout_box.currentText()); self.compare=compare.isChecked(); self.events_box.setChecked(events.isChecked()); self.show_readout=readout.isChecked(); self.show_navigator=navigator.isChecked(); self.show_legend=legend.isChecked(); self.snap_box.setChecked(snap.isChecked()); self.max_render_points=int(points.value())
+        # Batch-apply dialog state with one intentional refresh.  The layout
+        # combo and events checkbox each emit their own refresh-triggering
+        # signal, so block them while the new values land.
+        self.layout_mode.blockSignals(True); self.layout_mode.setCurrentText(layout_box.currentText()); self.layout_mode.blockSignals(False)
+        self.events_box.blockSignals(True); self.events_box.setChecked(events.isChecked()); self.events_box.blockSignals(False)
+        self.compare=compare.isChecked(); self.show_readout=readout.isChecked(); self.show_navigator=navigator.isChecked(); self.show_legend=legend.isChecked(); self.snap_box.setChecked(snap.isChecked()); self.max_render_points=int(points.value())
         self.more_events_action.setChecked(self.events_box.isChecked()); self.more_nav_action.setChecked(self.show_navigator); self.more_snap_action.setChecked(self.snap_box.isChecked())
         self.readout.setVisible(self.show_readout); self.navigator.setVisible(self.show_navigator); self.refresh()
 
@@ -2254,7 +2270,7 @@ class WaveformDisplay(QtWidgets.QWidget):
         if not ok:return
         label=str(label).strip() or 'Bookmark'
         add_bookmark(active.run,float(self.cursors.x),label,x_mode=self.x_mode)
-        self.store.changed.emit(); self.refresh()
+        self.store.changed.emit()
 
     def _add_region(self):
         active=self.store.active
@@ -2266,7 +2282,7 @@ class WaveformDisplay(QtWidgets.QWidget):
         if not ok:return
         try:add_region(active.run,a,b,str(label).strip() or 'Region',x_mode=self.x_mode)
         except Exception as exc:QtWidgets.QMessageBox.warning(self,'Add region',str(exc));return
-        self.store.changed.emit(); self.refresh()
+        self.store.changed.emit()
 
     def _previous_view(self):
         if not self._plots or not self._range_history:
@@ -2473,7 +2489,7 @@ class WaveformDisplay(QtWidgets.QWidget):
             self._refresh_impl()
         except Exception as exc:
             logging.getLogger(__name__).exception("Waveform render failed")
-            self.graph.clear(); self._plots.clear(); self._lines.clear(); self._reference_regions.clear(); self._plot_headers.clear()
+            self._clear_scene()
             self.render_status.setText("RENDER ERROR — see diagnostic log")
             self.render_status.setStyleSheet("color:#ff7b72; font-weight:bold;")
             try:
@@ -2482,13 +2498,19 @@ class WaveformDisplay(QtWidgets.QWidget):
             except Exception:
                 pass
 
-    def _refresh_impl(self):
+    def _clear_scene(self):
+        """Tear down all scene objects and invalidate the incremental signature."""
         self.graph.clear()
+        self._plots.clear(); self._lines.clear(); self._reference_regions.clear(); self._plot_headers.clear()
+        self._curve_slots.clear(); self._event_items.clear()
+        self._sig_struct = None; self._sig_pattern = None; self._rendered_run_id = None
+
+    def _refresh_impl(self):
         self.render_status.setText("Rendering…"); self.render_status.setStyleSheet("")
         self._rendered_curve_count=0; self._rendered_point_count=0
-        self._plots.clear(); self._lines.clear(); self._reference_regions.clear(); self._plot_headers.clear()
         active = self.store.active
         if active is None:
+            self._clear_scene()
             return
         run = active.run
         if not self.channels:
@@ -2502,6 +2524,7 @@ class WaveformDisplay(QtWidgets.QWidget):
         if self.channels and not any(c in available for c in self.channels):
             self.channels = choose_default_plot_channels(run, limit=5)
         if not self.channels:
+            self._clear_scene()
             label = pg.LabelItem('No numeric channels are available to plot. Open Data Integrity for import diagnostics.', color='#e8a15b')
             self.graph.addItem(label, row=0, col=0)
             return
@@ -2526,6 +2549,102 @@ class WaveformDisplay(QtWidgets.QWidget):
                 key = f"channel:{c}"
             groups.setdefault(key, []).append(c)
 
+        handles = self.store.overlays() if self.compare else [active]
+        struct = self._scene_signature(mode, groups, handles)
+        if self._sig_struct == struct and self._plots:
+            # Same scene topology: verify the per-slot resolution pattern still
+            # matches before reusing objects.  A matching curve COUNT alone is
+            # not proof of a matching scene.
+            plan = self._plan_slots(groups, handles, run)
+            if plan is not None and self._refresh_incremental(groups, handles, plan, active, run, struct):
+                return
+        self._refresh_full(groups, handles, active, run, struct)
+
+    def _scene_signature(self, mode: str, groups: Dict[str, List[str]], handles: List[RunHandle]) -> tuple:
+        """Scene-shape descriptor — deliberately excludes run/handle identity.
+
+        Two renders with the same signature have the same bands, the same
+        channel order inside each band, and the same number of participating
+        sessions, so existing PlotItems/curves may be reused.  Display units
+        and axis groups are already encoded in the group keys.
+        """
+        legend_flags = tuple(
+            bool(self.show_legend and (self.compare or len(chans) > 1 or mode == 'Overlay'))
+            for _key, chans in groups.items())
+        return (
+            mode,
+            tuple(self.channels),
+            tuple((key, tuple(chans)) for key, chans in groups.items()),
+            len(handles),
+            legend_flags,
+            bool(self.events_box.isChecked()),
+        )
+
+    def _resolve_slot(self, handle: RunHandle, c: str, run: TelemetryRun):
+        """Resolve one (channel, session) slot to prepared display X/Y.
+
+        Returns (x, y) arrays ready for plotting, or None when the slot has no
+        drawable trace.  This is the single data path shared by the full build
+        and the incremental update — source resolution, unit conversion and
+        decimation semantics are identical either way.
+        """
+        # For compare sessions, use exact channel name when present; if
+        # absent, fall back to the same canonical role.
+        target = c
+        if target not in handle.run.data.columns and target not in handle.run.native_channels:
+            role = next((k for k, v in run.metadata.get('original_channel_map', {}).items() if v == c), None)
+            target = handle.run.metadata.get('original_channel_map', {}).get(role, '') if role else ''
+        if not target:
+            return None
+        x, y = self._x_data(handle, target)
+        source_unit = normalize_unit(handle.run.units.get(target, ''))
+        target_unit = self._display_unit(c, run)
+        if source_unit and target_unit and dimension(source_unit) == dimension(target_unit) and source_unit != target_unit:
+            try: y = np.asarray(convert_value(np.asarray(y,float), source_unit, target_unit), dtype=float)
+            except Exception: y = np.asarray(y,float)
+        prepared=prepare_plot_series(x,y,max_points=self.max_render_points)
+        if prepared.output_points < 2:
+            logging.getLogger(__name__).warning("Skipped trace %s from %s: %s", target, handle.label, prepared.warning or 'fewer than two drawable samples')
+            return None
+        if prepared.warning:
+            logging.getLogger(__name__).warning("Display repair for %s/%s: %s", handle.label, target, prepared.warning)
+        return prepared.x, prepared.y
+
+    def _plan_slots(self, groups: Dict[str, List[str]], handles: List[RunHandle], run: TelemetryRun):
+        """Resolve every candidate curve slot and compare to the rendered scene.
+
+        Returns a per-band slot plan when the resolved presence/absence
+        pattern exactly matches the existing scene, or None when any slot
+        appeared/disappeared — in which case the caller must full-rebuild.
+        """
+        plan = []
+        pattern = []
+        for _key, chans in groups.items():
+            band_slots = []
+            band_pattern = []
+            for c in chans:
+                for hidx, handle in enumerate(handles):
+                    resolved = self._resolve_slot(handle, c, run)
+                    band_slots.append((c, hidx, resolved))
+                    band_pattern.append(resolved is not None)
+            plan.append(band_slots)
+            pattern.append(tuple(band_pattern))
+        if tuple(pattern) != self._sig_pattern:
+            return None
+        return plan
+
+    def _refresh_full(self, groups: Dict[str, List[str]], handles: List[RunHandle], active: RunHandle, run: TelemetryRun, struct: tuple):
+        """Full scene rebuild — the trusted fallback for any topology change."""
+        self.graph.clear()
+        self._plots.clear(); self._lines.clear(); self._reference_regions.clear(); self._plot_headers.clear()
+        self._curve_slots.clear(); self._event_items.clear()
+        # Event/annotation lists are band-independent; compute them once.
+        ann_regions = []
+        event_positions = []
+        if self.events_box.isChecked():
+            ann_regions = [ann for ann in annotations_for_mode(run, self.x_mode) if ann.kind == 'region' and ann.x2 is not None]
+            event_positions = self._event_positions(run)
+        pattern = []
         first_plot = None
         for row, (_group, chans) in enumerate(groups.items()):
             vb = VelocityWaveformViewBox(enableMenu=False)
@@ -2536,7 +2655,7 @@ class WaveformDisplay(QtWidgets.QWidget):
             # In a one-channel stacked plot the Y-axis already names the trace;
             # a legend just steals plot area.  Keep legends for overlays, unit
             # groups and compare runs where they carry real information.
-            if self.show_legend and (self.compare or len(chans)>1 or mode=='Overlay'):
+            if self.show_legend and (self.compare or len(chans)>1 or self.layout_mode.currentText()=='Overlay'):
                 p.addLegend(offset=(-8, 8), labelTextColor='#d6d6d6', brush=pg.mkBrush(24,26,29,180), pen=pg.mkPen('#44484d'))
             p.getAxis('left').setTextPen('#aeb4bb'); p.getAxis('bottom').setTextPen('#aeb4bb')
             try:p.getAxis('left').setWidth(52)
@@ -2546,29 +2665,14 @@ class WaveformDisplay(QtWidgets.QWidget):
             else:
                 p.setXLink(first_plot)
             self._plots.append(p)
+            band_pattern = []
             for local_idx, c in enumerate(chans):
-                for run_idx, handle in enumerate(self.store.overlays() if self.compare else [active]):
-                    # For compare sessions, use exact channel name when present; if
-                    # absent, fall back to the same canonical role.
-                    target = c
-                    if target not in handle.run.data.columns and target not in handle.run.native_channels:
-                        role = next((k for k, v in run.metadata.get('original_channel_map', {}).items() if v == c), None)
-                        target = handle.run.metadata.get('original_channel_map', {}).get(role, '') if role else ''
-                    if not target:
+                for run_idx, handle in enumerate(handles):
+                    resolved = self._resolve_slot(handle, c, run)
+                    band_pattern.append(resolved is not None)
+                    if resolved is None:
                         continue
-                    x, y = self._x_data(handle, target)
-                    source_unit = normalize_unit(handle.run.units.get(target, ''))
-                    target_unit = self._display_unit(c, run)
-                    if source_unit and target_unit and dimension(source_unit) == dimension(target_unit) and source_unit != target_unit:
-                        try: y = np.asarray(convert_value(np.asarray(y,float), source_unit, target_unit), dtype=float)
-                        except Exception: y = np.asarray(y,float)
-                    prepared=prepare_plot_series(x,y,max_points=self.max_render_points)
-                    if prepared.output_points < 2:
-                        logging.getLogger(__name__).warning("Skipped trace %s from %s: %s", target, handle.label, prepared.warning or 'fewer than two drawable samples')
-                        continue
-                    x=prepared.x; y=prepared.y
-                    if prepared.warning:
-                        logging.getLogger(__name__).warning("Display repair for %s/%s: %s", handle.label, target, prepared.warning)
+                    x, y = resolved
                     style = self._style_for(c, self.channels.index(c))
                     color = style.get('color', '#e0e0e0')
                     base_width = float(style.get('width', 1.6))
@@ -2576,8 +2680,10 @@ class WaveformDisplay(QtWidgets.QWidget):
                                    style=QtCore.Qt.SolidLine if handle is active else QtCore.Qt.DashLine)
                     name = c if handle is active else f"{c} — {handle.label}"
                     curve=p.plot(x, y, pen=pen, name=name)
+                    self._curve_slots.append((p, c, run_idx, curve))
                     self._rendered_curve_count=getattr(self,'_rendered_curve_count',0)+1
                     self._rendered_point_count=getattr(self,'_rendered_point_count',0)+int(len(x))
+            pattern.append(tuple(band_pattern))
             label_unit = self._display_unit(chans[0], run)
             # The per-band header carries the channel name/current/reference
             # values. Keep the Y axis narrow and numeric, like ATLAS/i2.
@@ -2621,20 +2727,135 @@ class WaveformDisplay(QtWidgets.QWidget):
             p.addItem(band_header, ignoreBounds=True)
             self._plot_headers.append((p, band_header, list(chans)))
             p.sigRangeChanged.connect(lambda _plot, _ranges, pp=p, hh=band_header: self._position_plot_header(pp, hh))
-            if self.events_box.isChecked():
-                for ann in annotations_for_mode(run,self.x_mode):
-                    if ann.kind=='region' and ann.x2 is not None:
-                        region=pg.LinearRegionItem(values=(float(ann.x1),float(ann.x2)),movable=False,brush=pg.mkBrush(QtGui.QColor(ann.color).red(),QtGui.QColor(ann.color).green(),QtGui.QColor(ann.color).blue(),28),pen=pg.mkPen(ann.color,width=1,style=QtCore.Qt.DotLine))
-                        region.setZValue(-20); p.addItem(region)
-                for ev_name, ev_x in self._event_positions(run):
-                    ev = pg.InfiniteLine(pos=ev_x, angle=90, movable=False, pen=pg.mkPen('#666a70', width=1, style=QtCore.Qt.DotLine), label=ev_name, labelOpts={'position':0.94,'color':'#8f949a'})
-                    p.addItem(ev)
+            self._add_event_items(p, ann_regions, event_positions)
             cursor.sigPositionChanged.connect(lambda line: self._cursor_move(float(line.value())))
             ca.sigPositionChanged.connect(lambda line: self._a_move(float(line.value())))
             cb.sigPositionChanged.connect(lambda line: self._b_move(float(line.value())))
             self._lines.append((cursor, ca, cb))
             if first_plot is p:
                 p.sigXRangeChanged.connect(lambda plot, rng: self._range_changed(rng))
+        self._sig_struct = struct
+        self._sig_pattern = tuple(pattern)
+        self._rendered_run_id = id(run)
+        self._finish_refresh()
+
+    def _add_event_items(self, p, ann_regions, event_positions):
+        """Add the event/annotation graphics for one band and track them."""
+        for ann in ann_regions:
+            region=pg.LinearRegionItem(values=(float(ann.x1),float(ann.x2)),movable=False,brush=pg.mkBrush(QtGui.QColor(ann.color).red(),QtGui.QColor(ann.color).green(),QtGui.QColor(ann.color).blue(),28),pen=pg.mkPen(ann.color,width=1,style=QtCore.Qt.DotLine))
+            region.setZValue(-20); p.addItem(region)
+            self._event_items.append((p, region))
+        for ev_name, ev_x in event_positions:
+            ev = pg.InfiniteLine(pos=ev_x, angle=90, movable=False, pen=pg.mkPen('#666a70', width=1, style=QtCore.Qt.DotLine), label=ev_name, labelOpts={'position':0.94,'color':'#8f949a'})
+            p.addItem(ev)
+            self._event_items.append((p, ev))
+
+    def _rename_curve(self, p, curve, name: str) -> bool:
+        """Update a curve's legend name in place via the public LegendItem API.
+
+        Returns False when a legend exists but has no label for this curve —
+        the caller then falls back to a full rebuild rather than risk a stale
+        legend entry.
+        """
+        if curve.opts.get('name') == name:
+            return True
+        curve.opts['name'] = name
+        legend = getattr(p, 'legend', None)
+        if legend is None:
+            return True
+        try:
+            label = legend.getLabel(curve)
+            if label is not None:
+                label.setText(name)
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _refresh_incremental(self, groups: Dict[str, List[str]], handles: List[RunHandle], plan, active: RunHandle, run: TelemetryRun, struct: tuple) -> bool:
+        """Same-topology refresh: update existing curves/objects in place.
+
+        The caller has already proven that the structural signature and the
+        per-slot resolution pattern match the existing scene.  Returns False
+        (caller must full-rebuild) if any pairing or legend update fails.
+        """
+        # Annotations/bookmarks can change without changing topology; rebuild
+        # only the tracked event layer, computed once per refresh.
+        for p, item in self._event_items:
+            p.removeItem(item)
+        self._event_items.clear()
+        ann_regions = []
+        event_positions = []
+        if self.events_box.isChecked():
+            ann_regions = [ann for ann in annotations_for_mode(run, self.x_mode) if ann.kind == 'region' and ann.x2 is not None]
+            event_positions = self._event_positions(run)
+
+        slot_iter = iter(self._curve_slots)
+        legend_failed = False
+        for row, (gkey, chans) in enumerate(groups.items()):
+            p = self._plots[row]
+            for (c, hidx, resolved) in plan[row]:
+                if resolved is None:
+                    continue
+                try:
+                    bp, c0, h0, curve = next(slot_iter)
+                except StopIteration:
+                    return False
+                if bp is not p or c0 != c or h0 != hidx:
+                    return False
+                x, y = resolved
+                handle = handles[hidx]
+                style = self._style_for(c, self.channels.index(c))
+                color = style.get('color', '#e0e0e0')
+                base_width = float(style.get('width', 1.6))
+                pen = pg.mkPen(color, width=base_width if handle is active else max(0.8, base_width*0.65),
+                               style=QtCore.Qt.SolidLine if handle is active else QtCore.Qt.DashLine)
+                name = c if handle is active else f"{c} — {handle.label}"
+                curve.setData(x, y)
+                curve.setPen(pen)
+                if not self._rename_curve(p, curve, name):
+                    legend_failed = True
+                self._rendered_curve_count += 1
+                self._rendered_point_count += int(len(x))
+            label_unit = self._display_unit(chans[0], run)
+            p.setLabel('left', display_label(label_unit) if label_unit else '')
+            if row == len(groups)-1:
+                p.setLabel('bottom', self.x_mode)
+            manual_ranges=[]
+            for ch in chans:
+                st=self.channel_styles.get(ch,{})
+                if 'y_min' in st and 'y_max' in st:
+                    manual_ranges.append((float(st['y_min']),float(st['y_max'])))
+            if manual_ranges:
+                p.setYRange(min(v[0] for v in manual_ranges), max(v[1] for v in manual_ranges), padding=0)
+                p.enableAutoRange(axis=pg.ViewBox.YAxis, enable=False)
+            else:
+                p.enableAutoRange(axis=pg.ViewBox.YAxis, enable=True)
+            self._add_event_items(p, ann_regions, event_positions)
+        if legend_failed or next(slot_iter, None) is not None:
+            return False
+
+        # X-range policy: a different active Run gets today's fresh autorange;
+        # a same-Run refresh (style/zero/annotation/data update) preserves the
+        # engineer's current zoom.
+        if self._plots and self._rendered_run_id is not None and id(run) != self._rendered_run_id:
+            lo = np.inf; hi = -np.inf
+            for slots in plan:
+                for (_c, _h, resolved) in slots:
+                    if resolved is None:
+                        continue
+                    xs = resolved[0]
+                    finite = xs[np.isfinite(xs)]
+                    if len(finite):
+                        lo = min(lo, float(np.nanmin(finite))); hi = max(hi, float(np.nanmax(finite)))
+            if np.isfinite(lo) and np.isfinite(hi) and hi > lo:
+                self._plots[0].setXRange(lo, hi, padding=0.02)
+        self._rendered_run_id = id(run)
+        self._finish_refresh()
+        return True
+
+    def _finish_refresh(self):
+        """Shared refresh tail for both render paths."""
         self.readout.setVisible(self.show_readout)
         self.navigator.setVisible(self.show_navigator)
         if self.show_navigator:self._refresh_navigator()
@@ -3919,9 +4140,13 @@ class Worksheet(QtWidgets.QMainWindow):
                 w=self.add_waveform(obj)
                 w.channels=list(cfg.get('channels',[]))
                 w.channel_styles={str(k):dict(v) for k,v in (cfg.get('channel_styles') or {}).items()}
+                # Restore is a single logical batch: block the per-widget
+                # refresh signals and issue one refresh at the end.
+                w.layout_mode.blockSignals(True)
                 idx=w.layout_mode.findText(cfg.get('layout_mode','Stacked Channels'))
                 if idx>=0:w.layout_mode.setCurrentIndex(idx)
-                w.events_box.setChecked(bool(cfg.get('event_markers',True)))
+                w.layout_mode.blockSignals(False)
+                w.events_box.blockSignals(True); w.events_box.setChecked(bool(cfg.get('event_markers',True))); w.events_box.blockSignals(False)
                 w.compare=bool(cfg.get('compare',True)); w.snap_box.setChecked(bool(cfg.get('snap_cursors',True)))
                 w.show_readout=bool(cfg.get('show_readout',False)); w.show_navigator=bool(cfg.get('show_navigator',False)); w.show_legend=bool(cfg.get('show_legend',True)); w.show_ab_cursors=bool(cfg.get('show_ab_cursors',False)); w.reference_visible=bool(cfg.get('reference_visible',False)); w.show_stat_delta=bool(cfg.get('show_stat_delta',True)); w.show_stat_min=bool(cfg.get('show_stat_min',False)); w.show_stat_max=bool(cfg.get('show_stat_max',False)); w.show_stat_mean=bool(cfg.get('show_stat_mean',False)); w.show_stat_std=bool(cfg.get('show_stat_std',False)); w.max_render_points=int(cfg.get('max_render_points',50000) or 50000)
                 w.more_events_action.setChecked(w.events_box.isChecked()); w.more_nav_action.setChecked(w.show_navigator); w.more_ab_action.setChecked(w.show_ab_cursors); w.more_snap_action.setChecked(w.snap_box.isChecked()); w.more_readout_action.setChecked(w.show_readout)
@@ -4724,8 +4949,6 @@ class MainWindow(QtWidgets.QMainWindow):
         if main_index is not None:self.store.active_index=main_index
         self.compare_sets.active_id=cs.id
         self.store.changed.emit();self.store.activeChanged.emit(self.store.active)
-        for i in range(self.worksheets.count()):
-            for w in self.worksheets.widget(i).waveforms:w.refresh()
         message=f'Applied Compare Set: {cs.name}'
         if missing:message+=f' — {len(missing)} saved Run(s) are not currently loaded'
         self.statusBar().showMessage(message,7000)
@@ -5699,7 +5922,6 @@ class MainWindow(QtWidgets.QMainWindow):
                             wave.channels=[cname if ch==existing_channel else ch for ch in wave.channels]
                             if existing_channel in wave.channel_styles:
                                 wave.channel_styles[cname]=wave.channel_styles.pop(existing_channel)
-                            wave.refresh()
             if save_template.isChecked():
                 tname=template_name.text().strip() or cname
                 save_math_channel_template(tname,formula,unit_key)
